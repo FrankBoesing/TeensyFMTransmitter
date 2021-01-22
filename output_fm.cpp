@@ -20,7 +20,7 @@
 */
 
 //  (c) Frank B
-  
+
 #if defined(__IMXRT1062__)
 
 #include "output_fm.h"
@@ -29,12 +29,11 @@
 
 #define NUM_SAMPLES (AUDIO_BLOCK_SAMPLES / 2)
 
-DMAMEM __attribute__((aligned(32))) static int fm_buffer[AUDIO_BLOCK_SAMPLES];
+DMAMEM __attribute__((aligned(32))) static int fm_tx_buffer[NUM_SAMPLES * 2];
 audio_block_t * AudioOutputFM::block_left = NULL;
-
 bool AudioOutputFM::update_responsibility = false;
+DMAChannel AudioOutputFM::dma(false);
 
-//DMAChannel AudioOutputFM::dma(false);
 
 IntervalTimer myTimer;
 
@@ -48,7 +47,7 @@ static double FS; //PLL Frequency
 static float FM_preemphasis, preemp_alpha, onem_preemp_alpha;
 
 
-inline static void calc(audio_block_t *block);
+inline void calc(audio_block_t *block, const unsigned offset);
 
 // https://www.nxp.com/docs/en/application-note/AN5078.pdf
 #define PADCONFIG ((0 << 0) | (1 << 3) | (1 << 6)) //Pg 622 Reference Manual
@@ -61,9 +60,9 @@ inline static void calc(audio_block_t *block);
 FLASHMEM
 void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, float preemphasis)
 {
-  memset(fm_buffer, 0, sizeof(fm_buffer));
+  memset(fm_tx_buffer, 0, sizeof(fm_tx_buffer));
 
-  //  dma.begin(true); // Allocate the DMA channel first
+  dma.begin(true); // Allocate the DMA channel first
 
   FM_MHz = MHz;
   FS = FM_MHz * 1000000 * 4;
@@ -142,11 +141,32 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, float preemphasis)
 
     I2S1_TMR = 0;
     I2S1_TCR2 = I2S_TCR2_MSEL(1);
+
     CORE_PIN23_CONFIG = 3;
     CORE_PIN23_PADCONFIG = PADCONFIG;
+
   }
 
+
+  dma.TCD->SADDR = fm_tx_buffer;
+  dma.TCD->SOFF = 4;
+  dma.TCD->ATTR = DMA_TCD_ATTR_SSIZE(2) | DMA_TCD_ATTR_DSIZE(2);
+  dma.TCD->NBYTES_MLNO = 4;
+  dma.TCD->SLAST = -sizeof(fm_tx_buffer);
+  dma.TCD->DOFF = 0;
+  dma.TCD->CITER_ELINKNO = sizeof(fm_tx_buffer) / 4;
+  dma.TCD->DLASTSGA = 0;
+  dma.TCD->BITER_ELINKNO = sizeof(fm_tx_buffer) / 4;
+  dma.TCD->CSR = DMA_TCD_CSR_INTHALF | DMA_TCD_CSR_INTMAJOR;
+  dma.TCD->DADDR = (void *)((uint32_t)&CCM_ANALOG_PLL_VIDEO_NUM);
+
+  dma.attachInterrupt(dmaISR);
+  //  dma.triggerAtHardwareEvent(DMAMUX_SOURCE_SAI1_TX);
+  dma.enable();
+
   update_responsibility = update_setup();
+
+
 
   //TBD: Don't use this. Use DMA !important!
   myTimer.begin(isr, 1000000.0 / AUDIO_SAMPLE_RATE_EXACT);
@@ -158,29 +178,47 @@ void AudioOutputFM::update(void)
   AudioOutputFM::block_left = receiveReadOnly(0); // input 0
 }
 
+void AudioOutputFM::dmaISR()
+{
+  dma.clearInterrupt();
+
+  if (dma.TCD->SADDR < (uint32_t)fm_tx_buffer + NUM_SAMPLES * 4) {
+    // DMA is transmitting the first half of the buffer
+    // so we must fill the second half
+    if (AudioOutputFM::block_left) calc(AudioOutputFM::block_left, 0);
+  } else {
+    //fill the first half
+    if (AudioOutputFM::block_left) calc(AudioOutputFM::block_left, NUM_SAMPLES);
+    if (AudioOutputFM::update_responsibility) AudioStream::update_all();
+  }
+  asm("DSB");
+}
+
 void AudioOutputFM::isr(void)
 {
   static int idx = 0;
   audio_block_t *block = AudioOutputFM::block_left;
 
-  CCM_ANALOG_PLL_VIDEO_NUM   = fm_buffer[idx++];
-
+  // CCM_ANALOG_PLL_VIDEO_NUM   = fm_tx_buffer[idx];
+  AudioOutputFM::dma.triggerManual();
+#if 0   
+  idx++;
   if (idx >= AUDIO_BLOCK_SAMPLES) {
     idx = 0;
     if (AudioOutputFM::update_responsibility) AudioStream::update_all();
     if (AudioOutputFM::block_left) calc(AudioOutputFM::block_left);
   }
-
+#endif
   asm("DSB");
 }
 
-inline void calc(audio_block_t *block)
+inline void calc(audio_block_t *block, const unsigned offset)
 {
 
   static float lastSample = 0;
   float fsample;
 
-  for (unsigned idx = 0; idx < AUDIO_BLOCK_SAMPLES; idx++)
+  for (unsigned idx = offset; idx < NUM_SAMPLES+offset; idx++)
   {
     fsample = block->data[idx];
 
@@ -202,10 +240,10 @@ inline void calc(audio_block_t *block)
     double C = (fs * n1 * n2) / 24000000;
     int nfact = C;
     int nmult = C * ndiv - (nfact * ndiv);
-    fm_buffer[idx] = nmult;
+    fm_tx_buffer[idx] = nmult;
 
   }
-  //arm_dcache_flush_delete(fm_buffer, sizeof(fm_buffer) );
+  arm_dcache_flush_delete(&fm_tx_buffer[offset], sizeof(fm_tx_buffer) / 2 );
 }
 
 

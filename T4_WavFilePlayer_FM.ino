@@ -33,7 +33,7 @@ Any experiment is made under your own responsibility.
 #include "output_fm.h"
 
 AudioPlaySdWav           playWav1;
-AudioOutputFM            audioOutput(30, 91.0, 50e-6f); //Pin (23= I2S1, 30= I2S3, 33= I2S2) , Frequency in MHz, preemphasis
+AudioOutputFM            audioOutput(30, 91.0, PREEMPHASIS_EU); //Pin (23= I2S1, 30= I2S3, 33= I2S2) , Frequency in MHz, preemphasis
 AudioConnection          patchCord1(playWav1, 0, audioOutput, 0);
 
 void setup() {
@@ -61,6 +61,7 @@ void playFile(const char *filename)
     Serial.print("% ");
 
     Serial.println(AudioMemoryUsageMax());
+    Serial.println(CCM_ANALOG_PLL_VIDEO_NUM, HEX);
     delay(500);
   }
 }

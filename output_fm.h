@@ -30,6 +30,9 @@
 #include <AudioStream.h>
 #include <DMAChannel.h>
 
+#define PREEMPHASIS_EU 50e-6f
+#define PREEMPHASIS_US 75e-6f
+
 class AudioOutputFM : public AudioStream
 {
 public:
@@ -41,8 +44,9 @@ private:
 	static bool update_responsibility;
 	audio_block_t *inputQueueArray[1];
 
-	//static DMAChannel dma;
+	static DMAChannel dma;
 	static void isr(void);
+  static void dmaISR(void);
 
 };
 
