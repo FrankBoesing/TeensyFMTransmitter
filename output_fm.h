@@ -30,14 +30,14 @@
 #include <AudioStream.h>
 #include <DMAChannel.h>
 
-#define PREEMPHASIS_EU 50e-6f
-#define PREEMPHASIS_US 75e-6f
+#define PREEMPHASIS_50        0   // use this if you are in Europe or elsewhere in the world
+#define PREEMPHASIS_75        1   // use this if you are in the Americas or South Korea
 
 class AudioOutputFM : public AudioStream
 {
 public:
-	AudioOutputFM(uint8_t pin, unsigned MHz, float preemphasis) : AudioStream(1, inputQueueArray) { begin(pin, MHz, preemphasis); }   
-  void begin(uint8_t pin, unsigned MHz, float preemphasis); 
+	AudioOutputFM(uint8_t pin, unsigned MHz, int preemphasis) : AudioStream(1, inputQueueArray) { begin(pin, MHz, preemphasis); }   
+  void begin(uint8_t pin, unsigned MHz, int preemphasis); 
 	virtual void update(void);	
 private:
 	static audio_block_t *block_left;
