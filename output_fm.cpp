@@ -41,8 +41,10 @@ static const int ndiv = 10000;
 static double FS; //PLL Frequency
 static double FD;
 
-//preemphasis:  EU: 50 us -> tau = 50e-6, USA: 75 us -> tau = 75e-6
-static float FM_preemphasis, preemp_alpha, onem_preemp_alpha;
+//preemphasis
+static float pre_a0;
+static float pre_a1;
+static float pre_b;
 
 extern "C" void xbar_connect(unsigned int input, unsigned int output);
 inline void calc(audio_block_t *block, const unsigned offset);
@@ -56,7 +58,7 @@ inline void calc(audio_block_t *block, const unsigned offset);
 */
 
 FLASHMEM
-void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, float preemphasis)
+void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
 {
   memset(fm_tx_buffer, 0, sizeof(fm_tx_buffer));
 
@@ -64,12 +66,46 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, float preemphasis)
 
   FM_MHz = MHz;
   FS = FM_MHz * 1000000 * 4;
-  FD = 4.0 * (1.0/32767.0) * FM_deviation;
-   
-  FM_preemphasis    = preemphasis; //EU: 50 us -> tau = 50e-6, USA: 75 us -> tau = 75e-6
-  preemp_alpha      = (1.0 - exp(- 1.0 / (AUDIO_SAMPLE_RATE_EXACT * (double)FM_preemphasis)));
-  onem_preemp_alpha = (1.0 - preemp_alpha);
 
+
+    // pre-emphasis has been based on the filter designed by Jonti
+    // use more sophisticated pre-emphasis filter: https://jontio.zapto.org/download/preempiir.pdf
+    // https://github.com/jontio/JMPX/blob/master/libJMPX/JDSP.cpp
+  // TODO: uncomment this in case that a sample rate of 192ksps is used !
+  // sample rate 192ksps
+/*  if(preemphasis == PREEMPHASIS_50)
+  {
+    pre_a0 = 5.309858008;
+    pre_a1 = -4.794606188;
+    pre_b = 0.4847481783;
+  }
+  else
+  {
+    pre_a0 = 7.681633687l;
+    pre_a1 = -7.170926091l;
+    pre_b = 0.4892924010l;
+  }
+*/
+
+  FD = 4.0 * (1.0/32767.0) * FM_deviation;
+
+
+    // this is a more sophisticated pre-emphasis filter: https://jontio.zapto.org/download/preempiir.pdf
+  // filter coefficients calculated for new sample rate of 44.1ksps by DD4WH, 2021-01-23
+  // sample rate 44.1ksps
+  if(preemphasis == PREEMPHASIS_50)
+  {
+    pre_a0 = 4.655206052723760;
+    pre_a1 = -2.911399421812300;
+    pre_b = -0.743806630911458;
+  }
+  else
+  { // PREAMPHASIS_75
+    pre_a0 = 6.597864306804010;
+    pre_a1 = -4.854202108640480;
+    pre_b = -0.743662198163528;
+  }
+  
   //PLL:
 
   int n1 = 2; //SAI prescaler
@@ -216,22 +252,27 @@ inline void calc(audio_block_t *block, const unsigned offset)
 {
 
   static float lastSample = 0;
+  static float lastInputSample = 0;
   float fsample;
 
   for (unsigned idx = offset; idx < NUM_SAMPLES + offset; idx++)
   {
     fsample = block->data[idx];
 
-    //pre-emphasis
-    //   fsample = preemp_alpha * fsample + onem_preemp_alpha * lastSample; //de-emphasis
-    fsample = onem_preemp_alpha * fsample + preemp_alpha * lastSample; //pre-emphasis
-    lastSample = fsample;
+    // pre-emphasis filter: https://jontio.zapto.org/download/preempiir.pdf
+    // https://github.com/jontio/JMPX/blob/master/libJMPX/JDSP.cpp
+    fsample = pre_a0 * fsample + pre_a1 * lastInputSample + pre_b * fsample;
+    lastInputSample = block->data[idx];
 
     //TBD: add pilot-tone, process stereo
     //TBD: RDS(?)
 
+   //Calc PLL:
+    float fs = FS + fsample * 4.0f  /* volume correction: */ * 2.0f * (FM_Hub / 4.0f / 32767.0f);
+
     //Calc PLL:    
     double fs = FS + FD * fsample;
+
 
     const unsigned n1 = 2; //SAI prescaler
     unsigned n2 = 1 + (24000000 * 27) / (fs * n1);
