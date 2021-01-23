@@ -33,8 +33,9 @@ Any experiment is made under your own responsibility.
 #include "output_fm.h"
 
 AudioPlaySdWav           playWav1;
-//AudioOutputFM            audioOutput(30, 91.0, PREEMPHASIS_75); //Pin (23= I2S1, 30= I2S3, 33= I2S2) , Frequency in MHz, preemphasis
 AudioOutputFM            audioOutput(33, 107.0, PREEMPHASIS_50); //Pin (23= I2S1, 30= I2S3, 33= I2S2) , Frequency in MHz, preemphasis
+                        // PREEMPHASIS_50  -   use this if you are unsure where you are ;-)
+                        // PREEMPHASIS_75  -   use this if you are in the USA, Aruba, Bahamas, Colombia, Gambia, South Korea, Vatican State, Lithuania, Morocco, Mexico, Turkey or Ukraine [https://www.itu.int/dms_pubrec/itu-r/rec/bs/R-REC-BS.450-3-200111-S!!PDF-E.pdf]
 AudioConnection          patchCord1(playWav1, 0, audioOutput, 0);
 
 void setup() {
