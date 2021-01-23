@@ -35,11 +35,11 @@ bool AudioOutputFM::update_responsibility = false;
 DMAChannel AudioOutputFM::dma(false);
 
 static double FM_MHz;
-static const double FM_deviation = 75000.0;
 
-static const int ndiv = 10000;
+static const double FM_deviation = 75000.0;
+static const double FD = 4.0 * (1.0/32767.0) * FM_deviation;
 static double FS; //PLL Frequency
-static double FD;
+static const int ndiv = 10000;
 
 //preemphasis
 static float pre_a0;
@@ -86,9 +86,6 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
     pre_b = 0.4892924010l;
   }
 */
-
-  FD = 4.0 * (1.0/32767.0) * FM_deviation;
-
 
     // this is a more sophisticated pre-emphasis filter: https://jontio.zapto.org/download/preempiir.pdf
   // filter coefficients calculated for new sample rate of 44.1ksps by DD4WH, 2021-01-23
@@ -267,13 +264,8 @@ inline void calc(audio_block_t *block, const unsigned offset)
     //TBD: add pilot-tone, process stereo
     //TBD: RDS(?)
 
-   //Calc PLL:
-    float fs = FS + fsample * 4.0f  /* volume correction: */ * 2.0f * (FM_Hub / 4.0f / 32767.0f);
-
     //Calc PLL:    
     double fs = FS + FD * fsample;
-
-
     const unsigned n1 = 2; //SAI prescaler
     unsigned n2 = 1 + (24000000 * 27) / (fs * n1);
 

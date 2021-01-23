@@ -62,7 +62,6 @@ void playFile(const char *filename)
     Serial.print("% ");
 
     Serial.println(AudioMemoryUsageMax());
-    Serial.println(CCM_ANALOG_PLL_VIDEO_NUM, HEX);
     delay(500);
   }
 }
