@@ -30,8 +30,8 @@
 #include <AudioStream.h>
 #include <DMAChannel.h>
 
-#define PREEMPHASIS_50        0   // use this if you are in Europe or elsewhere in the world
-#define PREEMPHASIS_75        1   // use this if you are in the Americas or South Korea
+#define PREEMPHASIS_50        0   // use this if you are unsure where you are ;-)
+#define PREEMPHASIS_75        1   // use this if you are in the USA, Aruba, Bahamas, Colombia, Gambia, South Korea, Vatican State, Lithuania, Morocco, Mexico, Turkey or Ukraine [https://www.itu.int/dms_pubrec/itu-r/rec/bs/R-REC-BS.450-3-200111-S!!PDF-E.pdf]
 
 class AudioOutputFM : public AudioStream
 {
