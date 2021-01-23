@@ -34,7 +34,7 @@ Any experiment is made under your own responsibility.
 #include "output_fm.h"
 
 AudioPlaySdWav           playWav1;
-AudioOutputFM            audioOutput(33, 91.0, 50e-6f); //Pin (23= I2S1, 30= I2S3, 33= I2S2) , Frequency in MHz, preemphasis: EU: 50 us -> tau = 50e-6, USA: 75 us -> tau = 75e-6
+AudioOutputFM            audioOutput(33, 91.0, PREEMPHASIS_50); //Pin (23= I2S1, 30= I2S3, 33= I2S2) , Frequency in MHz, preemphasis: EU: 50 us -> tau = 50e-6, USA: 75 us -> tau = 75e-6
 
 AudioConnection          patchCord1(playWav1, 0, audioOutput, 0);
 
