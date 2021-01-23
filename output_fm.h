@@ -44,8 +44,7 @@ private:
 	static bool update_responsibility;
 	audio_block_t *inputQueueArray[1];
 
-	static DMAChannel dma;
-	static void isr(void);
+	static DMAChannel dma;	
   static void dmaISR(void);
 
 };

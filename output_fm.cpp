@@ -34,9 +34,6 @@ audio_block_t * AudioOutputFM::block_left = NULL;
 bool AudioOutputFM::update_responsibility = false;
 DMAChannel AudioOutputFM::dma(false);
 
-
-IntervalTimer myTimer;
-
 static double FM_MHz;
 static const float FM_Hub = 75000.0f; //deviation
 
@@ -46,7 +43,7 @@ static double FS; //PLL Frequency
 //preemphasis:  EU: 50 us -> tau = 50e-6, USA: 75 us -> tau = 75e-6
 static float FM_preemphasis, preemp_alpha, onem_preemp_alpha;
 
-
+extern "C" void xbar_connect(unsigned int input, unsigned int output);
 inline void calc(audio_block_t *block, const unsigned offset);
 
 // https://www.nxp.com/docs/en/application-note/AN5078.pdf
@@ -73,7 +70,6 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, float preemphasis)
 
   //PLL:
 
-  // PLL between 27*24 = 648MHz und 54*24=1296MHz
   int n1 = 2; //SAI prescaler
   int n2 = 1 + (24000000 * 27) / (FS * n1);
 
@@ -147,7 +143,30 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, float preemphasis)
 
   }
 
-
+  //QTimer
+  const int comp1 = ((float)F_BUS_ACTUAL) / (AUDIO_SAMPLE_RATE_EXACT / 2.0f) / 2.0f + 0.5f;
+  TMR4_ENBL &= ~(1 << 3); //Disable
+  TMR4_SCTRL3 = TMR_SCTRL_OEN | TMR_SCTRL_FORCE;
+  TMR4_CSCTRL3 = TMR_CSCTRL_CL1(1) /*| TMR_CSCTRL_TCF1EN*/;
+  TMR4_CNTR3 = 0;
+  TMR4_LOAD3 = 0;
+  TMR4_COMP13 = comp1;
+  TMR4_CMPLD13 = comp1;
+  TMR4_CTRL3 = TMR_CTRL_CM(1) | TMR_CTRL_PCS(8) | TMR_CTRL_LENGTH | TMR_CTRL_OUTMODE(3);
+  /*Comparator Preload Register 1 DMA Enable
+    Setting this bit enables DMA write requests for CMPLD1 whenever data is transferred out of the CMPLD1
+    register into the COMP1 register.
+  */
+  TMR4_DMA3 = TMR_DMA_CMPLD1DE;
+  TMR4_CNTR3 = 0;
+  TMR4_ENBL |= (1 << 3); //Enable
+ 
+  //route the timer outputs through XBAR to edge trigger DMA request
+  CCM_CCGR2 |= CCM_CCGR2_XBAR1(CCM_CCGR_ON);  //enable XBAR
+  xbar_connect(XBARA1_IN_QTIMER4_TIMER3, XBARA1_OUT_DMA_CH_MUX_REQ30);
+  XBARA1_CTRL0 = XBARA_CTRL_STS0 | XBARA_CTRL_EDGE0(3) | XBARA_CTRL_DEN0;
+  
+  //setup DMA  
   dma.TCD->SADDR = fm_tx_buffer;
   dma.TCD->SOFF = 4;
   dma.TCD->ATTR = DMA_TCD_ATTR_SSIZE(2) | DMA_TCD_ATTR_DSIZE(2);
@@ -159,17 +178,13 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, float preemphasis)
   dma.TCD->BITER_ELINKNO = sizeof(fm_tx_buffer) / 4;
   dma.TCD->CSR = DMA_TCD_CSR_INTHALF | DMA_TCD_CSR_INTMAJOR;
   dma.TCD->DADDR = (void *)((uint32_t)&CCM_ANALOG_PLL_VIDEO_NUM);
-
-  dma.attachInterrupt(dmaISR);
-  //  dma.triggerAtHardwareEvent(DMAMUX_SOURCE_SAI1_TX);
+  
+  dma.triggerAtHardwareEvent(DMAMUX_SOURCE_XBAR1_0);
+  dma.attachInterrupt(dmaISR); 
+  
   dma.enable();
-
+ 
   update_responsibility = update_setup();
-
-
-
-  //TBD: Don't use this. Use DMA !important!
-  myTimer.begin(isr, 1000000.0 / AUDIO_SAMPLE_RATE_EXACT);
 }
 
 void AudioOutputFM::update(void)
@@ -191,24 +206,7 @@ void AudioOutputFM::dmaISR()
     if (AudioOutputFM::block_left) calc(AudioOutputFM::block_left, NUM_SAMPLES);
     if (AudioOutputFM::update_responsibility) AudioStream::update_all();
   }
-  asm("DSB");
-}
 
-void AudioOutputFM::isr(void)
-{
-  static int idx = 0;
-  audio_block_t *block = AudioOutputFM::block_left;
-
-  // CCM_ANALOG_PLL_VIDEO_NUM   = fm_tx_buffer[idx];
-  AudioOutputFM::dma.triggerManual();
-#if 0   
-  idx++;
-  if (idx >= AUDIO_BLOCK_SAMPLES) {
-    idx = 0;
-    if (AudioOutputFM::update_responsibility) AudioStream::update_all();
-    if (AudioOutputFM::block_left) calc(AudioOutputFM::block_left);
-  }
-#endif
   asm("DSB");
 }
 
