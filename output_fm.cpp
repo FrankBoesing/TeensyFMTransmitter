@@ -231,9 +231,8 @@ inline void calc(audio_block_t *block, const unsigned offset)
     //TBD: RDS(?)
 
     //Calc PLL:
-    float fs = FS + fsample * 4.0f * (FM_Hub / 4.0f / 32767.0f);
+    float fs = FS + fsample * 4.0f  /* volume correction: */ * 6.0f * (FM_Hub / 4.0f / 32767.0f);
 
-    // PLL between 27*24 = 648MHz und 54*24=1296MHz
     const int n1 = 2; //SAI prescaler
     int n2 = 1 + (24000000 * 27) / (fs * n1);
 
