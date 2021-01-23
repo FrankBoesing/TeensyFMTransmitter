@@ -35,10 +35,11 @@ bool AudioOutputFM::update_responsibility = false;
 DMAChannel AudioOutputFM::dma(false);
 
 static double FM_MHz;
-static const float FM_Hub = 75000.0f; //deviation
+static const double FM_deviation = 75000.0;
 
 static const int ndiv = 10000;
 static double FS; //PLL Frequency
+static double FD;
 
 //preemphasis
 static float pre_a0;
@@ -66,6 +67,7 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
   FM_MHz = MHz;
   FS = FM_MHz * 1000000 * 4;
 
+
     // pre-emphasis has been based on the filter designed by Jonti
     // use more sophisticated pre-emphasis filter: https://jontio.zapto.org/download/preempiir.pdf
     // https://github.com/jontio/JMPX/blob/master/libJMPX/JDSP.cpp
@@ -84,6 +86,9 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
     pre_b = 0.4892924010l;
   }
 */
+
+  FD = 4.0 * (1.0/32767.0) * FM_deviation;
+
 
     // this is a more sophisticated pre-emphasis filter: https://jontio.zapto.org/download/preempiir.pdf
   // filter coefficients calculated for new sample rate of 44.1ksps by DD4WH, 2021-01-23
@@ -193,13 +198,13 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
   TMR4_DMA3 = TMR_DMA_CMPLD1DE;
   TMR4_CNTR3 = 0;
   TMR4_ENBL |= (1 << 3); //Enable
- 
-  //route the timer outputs through XBAR to edge trigger DMA request
+
+  //route the timer output through XBAR to edge trigger DMA request
   CCM_CCGR2 |= CCM_CCGR2_XBAR1(CCM_CCGR_ON);  //enable XBAR
   xbar_connect(XBARA1_IN_QTIMER4_TIMER3, XBARA1_OUT_DMA_CH_MUX_REQ30);
   XBARA1_CTRL0 = XBARA_CTRL_STS0 | XBARA_CTRL_EDGE0(3) | XBARA_CTRL_DEN0;
-  
-  //setup DMA  
+
+  //setup DMA
   dma.TCD->SADDR = fm_tx_buffer;
   dma.TCD->SOFF = 4;
   dma.TCD->ATTR = DMA_TCD_ATTR_SSIZE(2) | DMA_TCD_ATTR_DSIZE(2);
@@ -211,12 +216,12 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
   dma.TCD->BITER_ELINKNO = sizeof(fm_tx_buffer) / 4;
   dma.TCD->CSR = DMA_TCD_CSR_INTHALF | DMA_TCD_CSR_INTMAJOR;
   dma.TCD->DADDR = (void *)((uint32_t)&CCM_ANALOG_PLL_VIDEO_NUM);
-  
+
   dma.triggerAtHardwareEvent(DMAMUX_SOURCE_XBAR1_0);
-  dma.attachInterrupt(dmaISR); 
-  
+  dma.attachInterrupt(dmaISR);
+
   dma.enable();
- 
+
   update_responsibility = update_setup();
 }
 
@@ -250,7 +255,7 @@ inline void calc(audio_block_t *block, const unsigned offset)
   static float lastInputSample = 0;
   float fsample;
 
-  for (unsigned idx = offset; idx < NUM_SAMPLES+offset; idx++)
+  for (unsigned idx = offset; idx < NUM_SAMPLES + offset; idx++)
   {
     fsample = block->data[idx];
 
@@ -262,16 +267,21 @@ inline void calc(audio_block_t *block, const unsigned offset)
     //TBD: add pilot-tone, process stereo
     //TBD: RDS(?)
 
-    //Calc PLL:
+   //Calc PLL:
     float fs = FS + fsample * 4.0f  /* volume correction: */ * 2.0f * (FM_Hub / 4.0f / 32767.0f);
 
-    const int n1 = 2; //SAI prescaler
-    int n2 = 1 + (24000000 * 27) / (fs * n1);
+    //Calc PLL:    
+    double fs = FS + FD * fsample;
 
-    double C = (fs * n1 * n2) / 24000000;
-    int nfact = C;
-    int nmult = C * ndiv - (nfact * ndiv);
+
+    const unsigned n1 = 2; //SAI prescaler
+    unsigned n2 = 1 + (24000000 * 27) / (fs * n1);
+
+    double C = (fs * (n1 * n2)) / 24000000;
+    unsigned nfact = C;
+    unsigned nmult = C * ndiv - (nfact * ndiv);
     fm_tx_buffer[idx] = nmult;
+    
 
   }
   arm_dcache_flush_delete(&fm_tx_buffer[offset], sizeof(fm_tx_buffer) / 2 );
