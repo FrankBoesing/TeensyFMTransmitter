@@ -1,0 +1,77 @@
+
+Wie es funktioniert:
+
+Takterzeugung:
+Die ist der einfache Teil.
+
+Die im i.mx.rt eingebaute Video-PLL wird benutzt, um die Frequenz zu erzeugen.
+
+(Siehe dazu auch i.mxr.rt Referenz Manual V2, Seite 1016)
+Die PLL läuft mit der 4-fachen Frequenz
+Eines der drei Audio-I2S Devices wird programmiert, die Video-PLL als Taktquelle zu nutzen.
+Auf dem Signalweg finden sich Teiler, die die erzeugte Frequenz durch 4 teilen.
+
+Also: 
+Gewünschte Frequenz: 100MHz
+Setze PLL auf 100 * 4 = 400MHz
+Im Signalweg eingebaute Teiler teilen wieder auf 100MHz herunter.
+Umgesetzt auf die Registerwerte ist dies die Variable: FS = Frequenz * 10^6 * 4
+
+Die Details der PLL-Konfiguration sind nicht weiter interessant, siehe Quellcode.
+
+Das I2S Device wird automatisch, abhängig vom PIN ausgewählt.
+Die einzige Funktion des I2S ist, den Takt direkt an den MCLK-PIN auszugeben.
+Das MCLK Pad wird konservativ konfiguriert (Langsame slew-rate, wenig Leistung) siehe PADCONFIG
+Dann wird der Pin auf GPIO auf MCLKC-Ausgabe umprogrammiert.
+Alle anderen Funktionen und die normalerweise gebrauchten I2S Signale werden nicht benutzt, und sind abgeschaltet, bzw. nicht konfiguriert.
+
+
+Frequenzmodulation:
+Jetzt wird ein bisschen komplizierter.
+Die bisher feste Frequenz muss mit einem 150KHz Frequenzhub moduliert werden.
+Dazu werden die einzelnen 16-Bit Samples (int16_t), die einen Wertebereich von -32767 ..  32768 haben, mit einem festen Faktor multipliziert, der
+exakt +-75Khz ergibt:
+
+const double FM_deviation = 75000.0;
+const double FD = 4.0 * (1.0/32767.0) * FM_deviation;
+
+(Wir erinnern uns: 4.0 * wegen der 4-fach höheren PLL-Frequenz)
+
+Die Audio-Library benutzt eine Sample Frequenz von 44.100Hz.
+D.h. Die Frequenz der PLL muss 44.100 mal in der Sekunde angepasst werden.
+Hierzu werden alle Werte vorberechnet, und in einem Array (fm_tx_buffer[]) zwischen gespeichert.
+DMA transportiert dieses Array dann zum entsprechenden Register der PLL - ganz ohne zutun der CPU, und vollständig im Hintergrund.
+
+In setup() laufen dazu (nachdem I2S eingerichtet wurde) die folgenden Schritte ab:
+1: Es wird ein Timer (QTimer4, Zähler Nr. 4) eingerichtet, der ein Signal mit 44KHz liefert.
+2: Die DMAMUX wird eingerichtet, dieses Signal auf Flanken zu untersuchen, und ein Signal für den DMA-Controller bereitzustellen.
+3: DMA wird konfiguriert:
+ a) Als Datenquelle dient fm_tx_buffer[]
+ b) Die Größe des Array wird bekanntgegeben, ebenso 32Bit Transfers. (4 Byte, "Minor loop")
+ c) Als feste Zieladresse wird das entsprechende Register der PLL genutzt.
+
+DMA transportiert also nun vollautomatisch das gesamte Array mit einer Frequenz von 44kHz an die PLL, die daraufhin die gewünschte Frequenz erzeugt.
+Ist das Ende des Arrays erreicht, wird wieder von neuem begonnen.
+Damit das funktioniert, muss währenddessen das Array mit neuen Werten versorgt werden:
+
+  d) der DMA Controller wird programmiert Interrupts zu triggern wenn die Mitte oder das Ende des Arrays erreicht ist.
+  
+Der Audio-Bibliothek wird noch bekannt gegeben, dass wir sie triggern können, dann ist das Setup beendet.
+
+
+Der Interrupt:
+Der Interrupt prüft zunächst welcher Teil des Arrays neue Daten benötigt.
+Ist die aktuelle DMA-Adresse in der ersten Hälfte des Arrays, wird die zweite Hälfte gefüllt - 
+ist sie in der zweiten Hälfte, muss die erste Hälfte gefüllt werden.
+
+Dazu wird jeweils "calc()" aufgerufen. Das übergebene Offset sagt welche Hälfte gefüllt werden muss.
+
+... 
+To be continued
+ 
+
+
+
+
+
+
