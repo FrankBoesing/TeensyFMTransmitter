@@ -61,10 +61,10 @@ typedef float fdata_t[I_NUM_SAMPLES];
 #if INTERPOLATION > 1
 static const unsigned interpolation_taps = 32;
 static const float n_att = 90.0; // desired stopband attenuation
-static const float n_desired_BW = 9.0; // desired max BW of the filters
+static const float interpol_cutoff = AUDIO_SAMPLE_RATE_EXACT / 2.0f; // 
 OCRAM32 float interpolation_coeffs[interpolation_taps];
-OCRAM32 float interpolation_L_state[interpolation_taps + I_NUM_SAMPLES];
-OCRAM32 float interpolation_R_state[interpolation_taps + I_NUM_SAMPLES];
+OCRAM32 float interpolation_L_state[NUM_SAMPLES + interpolation_taps / INTERPOLATION];
+OCRAM32 float interpolation_R_state[NUM_SAMPLES + interpolation_taps / INTERPOLATION];
 static arm_fir_interpolate_instance_f32 interpolationL;
 static arm_fir_interpolate_instance_f32 interpolationR;
 #endif
@@ -152,7 +152,9 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
    memset(interpolation_R_state, 0, sizeof(interpolation_R_state));
   
   //calc_FIR_coeffs (float * coeffs_I, int numCoeffs, float fc, float Astop, int type, float dfc, float Fsamprate)
-  calc_FIR_coeffs(interpolation_coeffs, interpolation_taps, n_desired_BW * 1000.0, n_att, 0, 0.0, AUDIO_SAMPLE_RATE_EXACT);
+  // the interpolation filter is AFTER the upsampling, so it has to be in the target sample rate
+  calc_FIR_coeffs(interpolation_coeffs, interpolation_taps, interpol_cutoff, n_att, 0, 0.0, AUDIO_SAMPLE_RATE_EXACT * INTERPOLATION);
+
   /*
      arm_status arm_fir_interpolate_init_f32  (   
       arm_fir_interpolate_instance_f32 *    S,
@@ -163,8 +165,9 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
       uint32_t    blockSize
     )
   */
-  if (arm_fir_interpolate_init_f32(&interpolationL, INTERPOLATION, interpolation_taps, interpolation_coeffs, interpolation_L_state, I_NUM_SAMPLES) ||
-      arm_fir_interpolate_init_f32(&interpolationR, INTERPOLATION, interpolation_taps, interpolation_coeffs, interpolation_R_state, I_NUM_SAMPLES))
+   // I think you should initiate the number of input samples, NOT the number of interpolated samples
+  if (arm_fir_interpolate_init_f32(&interpolationL, INTERPOLATION, interpolation_taps, interpolation_coeffs, interpolation_L_state, NUM_SAMPLES) ||
+      arm_fir_interpolate_init_f32(&interpolationR, INTERPOLATION, interpolation_taps, interpolation_coeffs, interpolation_R_state, NUM_SAMPLES))
   {
     Serial.println("Init of interpolation failed");
     while (1);
