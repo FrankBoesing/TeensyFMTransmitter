@@ -26,7 +26,7 @@
 
 #include "output_fm.h"
 
-#define INTERPOLATION 1
+#define INTERPOLATION 4
 
 #if !defined(INTERPOLATION) || INTERPOLATION < 1
 #error Set INTERPOLATION > 0 !
@@ -51,7 +51,7 @@ DMAChannel AudioOutputFM::dma(false);
 static double FM_MHz;
 static const double FM_deviation = 75000.0 * 4.0;
 static double FS; //PLL Frequency
-static const unsigned ndiv = 10000;
+static const unsigned ndiv = 0xffffff;
 
 
 typedef float fdata_t[I_NUM_SAMPLES];
@@ -171,16 +171,15 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
   }
 
 #endif
-
-  //PLL:
-  int n1 = 3; //SAI prescaler
-  int n2 = 1 + (24000000 * 27) / (FS * n1);
-  double C = (FS * n1 * n2) / 24000000;
+  
+  int n1 = 2; //SAI prescaler
+  int n2 = 1 + (24000000.0 * 27) / (FS * n1);
+  double C = (FS * n1 * n2) / 24000000.0;
   int nfact = C;
   int nmult = C * ndiv - (nfact * ndiv);
-
+   
   CCM_ANALOG_PLL_VIDEO = CCM_ANALOG_PLL_VIDEO_BYPASS | CCM_ANALOG_PLL_VIDEO_ENABLE
-                         | CCM_ANALOG_PLL_VIDEO_POST_DIV_SELECT(0) // 2: 1/4; 1: 1/2; 0: 1/1
+                         | CCM_ANALOG_PLL_VIDEO_POST_DIV_SELECT(0) // 0: 1/4; 1: 1/2; 2: 1/1
                          | CCM_ANALOG_PLL_VIDEO_DIV_SELECT(nfact);
 
   CCM_ANALOG_PLL_VIDEO_NUM   = nmult;
@@ -327,10 +326,10 @@ static inline __attribute__ ((pure))
 uint32_t calcPLLnmult(float fsample)
 {
   double fs = FS + FM_deviation * fsample;
-  const unsigned n1 = 3; //SAI prescaler
-  unsigned n2 = 1 + (24000000 * 27) / (fs * n1);
+  const unsigned n1 = 2; //SAI prescaler
+  unsigned n2 = 1 + (24000000.0 * 27) / (fs * n1);
 
-  double C = (fs * (n1 * n2)) / 24000000;
+  double C = (fs * (n1 * n2)) / 24000000.0;
   unsigned nfact = C;
   uint32_t nmult = C * ndiv - (nfact * ndiv);
   return nmult;
