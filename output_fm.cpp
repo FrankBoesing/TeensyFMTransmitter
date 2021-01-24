@@ -26,18 +26,18 @@
 #include "output_fm.h"
 #include <utility/dspinst.h>
 
-
 #define NUM_SAMPLES (AUDIO_BLOCK_SAMPLES / 2)
 
 DMAMEM __attribute__((aligned(32))) static int fm_tx_buffer[NUM_SAMPLES * 2];
 audio_block_t * AudioOutputFM::block_left = NULL;
+audio_block_t * AudioOutputFM::block_right = NULL;
+bool AudioOutputFM::mono;
 bool AudioOutputFM::update_responsibility = false;
 DMAChannel AudioOutputFM::dma(false);
 
 static double FM_MHz;
-
 static const double FM_deviation = 75000.0;
-static const double FD = 4.0 * (1.0/32767.0) * FM_deviation;
+static const double FD = 4.0 * (1.0 / 32767.0) * FM_deviation;
 static double FS; //PLL Frequency
 static const int ndiv = 10000;
 
@@ -47,7 +47,7 @@ static float pre_a1;
 static float pre_b;
 
 extern "C" void xbar_connect(unsigned int input, unsigned int output);
-inline void calc(audio_block_t *block, const unsigned offset);
+static void calc(audio_block_t *blockL, audio_block_t *blockR, const unsigned offset);
 
 // https://www.nxp.com/docs/en/application-note/AN5078.pdf
 #define PADCONFIG ((0 << 0) | (1 << 3) | (1 << 6)) //Pg 622 Reference Manual
@@ -64,33 +64,35 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
 
   dma.begin(true); // Allocate the DMA channel first
 
+  mono = true;
+
   FM_MHz = MHz;
   FS = FM_MHz * 1000000 * 4;
 
 
-    // pre-emphasis has been based on the filter designed by Jonti
-    // use more sophisticated pre-emphasis filter: https://jontio.zapto.org/download/preempiir.pdf
-    // https://github.com/jontio/JMPX/blob/master/libJMPX/JDSP.cpp
+  // pre-emphasis has been based on the filter designed by Jonti
+  // use more sophisticated pre-emphasis filter: https://jontio.zapto.org/download/preempiir.pdf
+  // https://github.com/jontio/JMPX/blob/master/libJMPX/JDSP.cpp
   // TODO: uncomment this in case that a sample rate of 192ksps is used !
   // sample rate 192ksps
-/*  if(preemphasis == PREEMPHASIS_50)
-  {
-    pre_a0 = 5.309858008;
-    pre_a1 = -4.794606188;
-    pre_b = 0.4847481783;
-  }
-  else
-  {
-    pre_a0 = 7.681633687l;
-    pre_a1 = -7.170926091l;
-    pre_b = 0.4892924010l;
-  }
-*/
+  /*  if(preemphasis == PREEMPHASIS_50)
+    {
+      pre_a0 = 5.309858008;
+      pre_a1 = -4.794606188;
+      pre_b = 0.4847481783;
+    }
+    else
+    {
+      pre_a0 = 7.681633687l;
+      pre_a1 = -7.170926091l;
+      pre_b = 0.4892924010l;
+    }
+  */
 
-    // this is a more sophisticated pre-emphasis filter: https://jontio.zapto.org/download/preempiir.pdf
+  // this is a more sophisticated pre-emphasis filter: https://jontio.zapto.org/download/preempiir.pdf
   // filter coefficients calculated for new sample rate of 44.1ksps by DD4WH, 2021-01-23
   // sample rate 44.1ksps
-  if(preemphasis == PREEMPHASIS_50)
+  if (preemphasis == PREEMPHASIS_50)
   {
     pre_a0 = 4.655206052723760;
     pre_a1 = -2.911399421812300;
@@ -102,14 +104,12 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
     pre_a1 = -4.854202108640480;
     pre_b = -0.743662198163528;
   }
-  
+
   //PLL:
 
   int n1 = 2; //SAI prescaler
   int n2 = 1 + (24000000 * 27) / (FS * n1);
-
   double C = (FS * n1 * n2) / 24000000;
-
   int nfact = C;
   int nmult = C * ndiv - (nfact * ndiv);
 
@@ -220,63 +220,101 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
   dma.enable();
 
   update_responsibility = update_setup();
+  
 }
 
+//Update Audio Library Data:
 void AudioOutputFM::update(void)
 {
   if (AudioOutputFM::block_left) release(AudioOutputFM::block_left);
+  if (AudioOutputFM::block_right) release(AudioOutputFM::block_right);  
   AudioOutputFM::block_left = receiveReadOnly(0); // input 0
+  AudioOutputFM::block_right = receiveReadOnly(1); // input 1
 }
 
+//DMA interrupt:
 void AudioOutputFM::dmaISR()
 {
   dma.clearInterrupt();
 
-  if (dma.TCD->SADDR < (uint32_t)fm_tx_buffer + NUM_SAMPLES * 4) {
+  if ((uint32_t)dma.TCD->SADDR < (uint32_t)&fm_tx_buffer[NUM_SAMPLES]) {
     // DMA is transmitting the first half of the buffer
     // so we must fill the second half
-    if (AudioOutputFM::block_left) calc(AudioOutputFM::block_left, 0);
+    calc(AudioOutputFM::block_left, AudioOutputFM::block_right, 0);
   } else {
     //fill the first half
-    if (AudioOutputFM::block_left) calc(AudioOutputFM::block_left, NUM_SAMPLES);
+    calc(AudioOutputFM::block_left, AudioOutputFM::block_right, NUM_SAMPLES);
     if (AudioOutputFM::update_responsibility) AudioStream::update_all();
   }
 
   asm("DSB");
 }
 
-inline void calc(audio_block_t *block, const unsigned offset)
-{
 
-  static float lastSample = 0;
+//Translates a sample to PLL multiplicator:
+static inline __attribute__ ((pure))
+uint32_t calcPLLnmult(float fsample)
+{
+  double fs = FS + FD * fsample;
+  const unsigned n1 = 2; //SAI prescaler
+  unsigned n2 = 1 + (24000000 * 27) / (fs * n1);
+
+  double C = (fs * (n1 * n2)) / 24000000;
+  unsigned nfact = C;
+  uint32_t nmult = C * ndiv - (nfact * ndiv);
+  return nmult;
+}
+
+
+static void processMono(audio_block_t *blockL, audio_block_t *blockR, const unsigned offset);
+static void processStereo(audio_block_t *blockL, audio_block_t *blockR, const unsigned offset);
+
+//Called for every (half-)block of samples:
+static
+void calc(audio_block_t *blockL, audio_block_t *blockR, const unsigned offset)
+{
+  if (blockL == nullptr) return;  
+
+  if (AudioOutputFM::mono || blockR == nullptr) {
+    processMono(blockL, blockR, offset);
+  } else {
+    processStereo(blockL, blockR, offset);
+  }
+  
+  //Flush cache to memory, so that DMA sees the new data
+  arm_dcache_flush_delete(&fm_tx_buffer[offset], sizeof(fm_tx_buffer) / 2 );
+}
+
+
+
+
+static void processMono(audio_block_t *blockL, audio_block_t *blockR, const unsigned offset)
+{
   static float lastInputSample = 0;
-  float fsample;
+  float sample;
 
   for (unsigned idx = offset; idx < NUM_SAMPLES + offset; idx++)
   {
-    fsample = block->data[idx];
-
+    sample = blockL->data[idx];
+    if (blockR != nullptr) sample = (sample + blockR->data[idx]) / 2;
+            
     // pre-emphasis filter: https://jontio.zapto.org/download/preempiir.pdf
     // https://github.com/jontio/JMPX/blob/master/libJMPX/JDSP.cpp
-    fsample = pre_a0 * fsample + pre_a1 * lastInputSample + pre_b * fsample;
-    lastInputSample = block->data[idx];
+    float tmp = sample;
+    sample = pre_a0 * sample + pre_a1 * lastInputSample + pre_b * sample;
+    lastInputSample = tmp;
 
+    fm_tx_buffer[idx] = calcPLLnmult(sample);
+  }
+}
+
+
+
+static void processStereo(audio_block_t *blockL, audio_block_t *blockR, const unsigned offset)
+{
+    //TBD: 
     //TBD: add pilot-tone, process stereo
     //TBD: RDS(?)
-
-    //Calc PLL:    
-    double fs = FS + FD * fsample;
-    const unsigned n1 = 2; //SAI prescaler
-    unsigned n2 = 1 + (24000000 * 27) / (fs * n1);
-
-    double C = (fs * (n1 * n2)) / 24000000;
-    unsigned nfact = C;
-    unsigned nmult = C * ndiv - (nfact * ndiv);
-    fm_tx_buffer[idx] = nmult;
-    
-
-  }
-  arm_dcache_flush_delete(&fm_tx_buffer[offset], sizeof(fm_tx_buffer) / 2 );
 }
 
 

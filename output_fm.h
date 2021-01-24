@@ -30,23 +30,27 @@
 #include <AudioStream.h>
 #include <DMAChannel.h>
 
-#define PREEMPHASIS_50        0   // use this if you are unsure where you are ;-)
-#define PREEMPHASIS_75        1   // use this if you are in the USA, Aruba, Bahamas, Colombia, Gambia, South Korea, Vatican State, Lithuania, Morocco, Mexico, Turkey or Ukraine [https://www.itu.int/dms_pubrec/itu-r/rec/bs/R-REC-BS.450-3-200111-S!!PDF-E.pdf]
+#define PREEMPHASIS_50        0   // use this if you are in Europe or elsewhere in the world
+#define PREEMPHASIS_75        1   // use this if you are in the Americas or South Korea
 
 class AudioOutputFM : public AudioStream
 {
-public:
-	AudioOutputFM(uint8_t pin, unsigned MHz, int preemphasis) : AudioStream(1, inputQueueArray) { begin(pin, MHz, preemphasis); }   
-  void begin(uint8_t pin, unsigned MHz, int preemphasis); 
-	virtual void update(void);	
-private:
-	static audio_block_t *block_left;
-	static bool update_responsibility;
-	audio_block_t *inputQueueArray[1];
+  public:
+    AudioOutputFM(uint8_t pin, unsigned MHz, int preemphasis) : AudioStream(2, inputQueueArray) {
+      begin(pin, MHz, preemphasis);
+    }
+    void begin(uint8_t pin, unsigned MHz, int preemphasis);
+    void forceMono(bool enable) {mono = enable;};
+    virtual void update(void);
 
-	static DMAChannel dma;	
-  static void dmaISR(void);
-
+    static bool mono;
+  private:
+    static audio_block_t *block_left;
+    static audio_block_t *block_right;
+    static bool update_responsibility;
+    audio_block_t *inputQueueArray[2];
+    static DMAChannel dma;
+    static void dmaISR(void);
 };
 
 #endif
