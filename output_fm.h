@@ -12,7 +12,8 @@
   so as not to emit radio waves. Never use an antenna.
 
   Even if you are a licensed amateur radio operator, using TeensyFMTransmitter to transmit
-  radio waves on ham frequencies without any filtering between the Teensy and an antenna is most probably illegal because the square-wave carrier is very rich in harmonics, so the bandwidth requirements are likely not met.
+  radio waves on ham frequencies without any filtering between the Teensy and an antenna is most probably illegal
+  because the square-wave carrier is very rich in harmonics, so the bandwidth requirements are likely not met.
 
   I could not be held liable for any misuse of your own Teensy.
   Any experiment is made under your own responsibility.
@@ -29,6 +30,8 @@
 #include <Arduino.h>
 #include <AudioStream.h>
 #include <DMAChannel.h>
+#include <arm_math.h>
+#include <arm_const_structs.h>
 
 #define PREEMPHASIS_50        0   // use this if you are in Europe or elsewhere in the world
 #define PREEMPHASIS_75        1   // use this if you are in the Americas or South Korea
@@ -40,16 +43,25 @@ class AudioOutputFM : public AudioStream
       begin(pin, MHz, preemphasis);
     }
     void begin(uint8_t pin, unsigned MHz, int preemphasis);
-    void forceMono(bool enable) {mono = enable;};
-    virtual void update(void);
 
+    void forceMono(bool enable) {
+      mono = enable;
+    };
+
+    unsigned long time_us(void) {
+      return us;
+    };
+
+    virtual void update(void);
     static bool mono;
+
   private:
     static audio_block_t *block_left;
     static audio_block_t *block_right;
     static bool update_responsibility;
     audio_block_t *inputQueueArray[2];
     static DMAChannel dma;
+    static unsigned long us;
     static void dmaISR(void);
 };
 
