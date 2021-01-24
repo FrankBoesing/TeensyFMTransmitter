@@ -26,7 +26,7 @@
 
 #include "output_fm.h"
 
-#define INTERPOLATION 4
+#define INTERPOLATION 1
 
 #if !defined(INTERPOLATION) || INTERPOLATION < 1
 #error Set INTERPOLATION > 0 !
@@ -62,9 +62,9 @@ typedef float fdata_t[I_NUM_SAMPLES];
 static const unsigned interpolation_taps = 32;
 static const float n_att = 90.0; // desired stopband attenuation
 static const float n_desired_BW = 9.0; // desired max BW of the filters
-static float interpolation_coeffs[interpolation_taps] = {0};
-float interpolation_L_state[interpolation_taps + I_NUM_SAMPLES];
-float interpolation_R_state[interpolation_taps + I_NUM_SAMPLES];
+OCRAM32 float interpolation_coeffs[interpolation_taps];
+OCRAM32 float interpolation_L_state[interpolation_taps + I_NUM_SAMPLES];
+OCRAM32 float interpolation_R_state[interpolation_taps + I_NUM_SAMPLES];
 static arm_fir_interpolate_instance_f32 interpolationL;
 static arm_fir_interpolate_instance_f32 interpolationR;
 #endif
@@ -147,11 +147,15 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
 
 
 #if INTERPOLATION > 1
+   memset(interpolation_coeffs, 0, sizeof(interpolation_coeffs));
+   memset(interpolation_L_state, 0, sizeof(interpolation_L_state));
+   memset(interpolation_R_state, 0, sizeof(interpolation_R_state));
+  
   //calc_FIR_coeffs (float * coeffs_I, int numCoeffs, float fc, float Astop, int type, float dfc, float Fsamprate)
- 
   calc_FIR_coeffs(interpolation_coeffs, interpolation_taps, n_desired_BW * 1000.0, n_att, 0, 0.0, AUDIO_SAMPLE_RATE_EXACT);
   /*
-     arm_status arm_fir_interpolate_init_f32  (   arm_fir_interpolate_instance_f32 *    S,
+     arm_status arm_fir_interpolate_init_f32  (   
+      arm_fir_interpolate_instance_f32 *    S,
       uint8_t   L,
       uint16_t    numTaps,
       const float32_t *   pCoeffs,
@@ -169,7 +173,7 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
 #endif
 
   //PLL:
-  int n1 = 2; //SAI prescaler
+  int n1 = 3; //SAI prescaler
   int n2 = 1 + (24000000 * 27) / (FS * n1);
   double C = (FS * n1 * n2) / 24000000;
   int nfact = C;
@@ -323,7 +327,7 @@ static inline __attribute__ ((pure))
 uint32_t calcPLLnmult(float fsample)
 {
   double fs = FS + FM_deviation * fsample;
-  const unsigned n1 = 2; //SAI prescaler
+  const unsigned n1 = 3; //SAI prescaler
   unsigned n2 = 1 + (24000000 * 27) / (fs * n1);
 
   double C = (fs * (n1 * n2)) / 24000000;
