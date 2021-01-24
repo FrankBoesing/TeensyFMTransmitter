@@ -112,7 +112,7 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
   // sample rate 192ksps
   
   // ATTENTION: SampleRate 44.1 * 4 = 176kHz
-#if INTERPOLATION >1 
+#if INTERPOLATION > 1 
   
     if(preemphasis == PREEMPHASIS_50)
     {
@@ -370,6 +370,9 @@ void process(audio_block_t *blockL, audio_block_t *blockR, unsigned offset)
   // interpolate
   arm_fir_interpolate_f32(&interpolationL, bL, iL, NUM_SAMPLES);
   arm_fir_interpolate_f32(&interpolationR, bR, iR, NUM_SAMPLES);
+  //Scaling after interpolation
+  arm_scale_f32(iL, (float)INTERPOLATION, iL, I_NUM_SAMPLES);
+  arm_scale_f32(iR, (float)INTERPOLATION, iR, I_NUM_SAMPLES);
 #endif
 
   offset *= INTERPOLATION;
