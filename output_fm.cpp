@@ -26,7 +26,7 @@
 
 #include "output_fm.h"
 
-#define INTERPOLATION 4
+#define INTERPOLATION 1
 
 #if !defined(INTERPOLATION) || INTERPOLATION < 1
 #error Set INTERPOLATION > 0 !
