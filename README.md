@@ -11,7 +11,7 @@ Prototype version, more a study than ready to use.
 * Stereo processing implemented
 
 
-DO NOT CONNECT A WIRE AS ANTENNA
+DO NOT CONNECT AN ANTENNA
 
 Teensy 4.x only
 
