@@ -26,7 +26,7 @@
 
 #include "output_fm.h"
 
-#define INTERPOLATION 1
+#define INTERPOLATION 4
 
 #if !defined(INTERPOLATION) || INTERPOLATION < 1
 #error Set INTERPOLATION > 0 !
@@ -35,11 +35,8 @@
 #define NUM_SAMPLES (AUDIO_BLOCK_SAMPLES / 2) //Input samples
 #define I_NUM_SAMPLES (NUM_SAMPLES * INTERPOLATION)
 
-#define PREEMPHASIS_DISABLE 0 //Testing
 
-#define OCRAM32 DMAMEM static  __attribute__((aligned(32)))
-
-OCRAM32 int fm_tx_buffer[I_NUM_SAMPLES * 2];
+DMAMEM static  __attribute__((aligned(32))) int fm_tx_buffer[I_NUM_SAMPLES * 2];
 audio_block_t * AudioOutputFM::block_left = NULL;
 audio_block_t * AudioOutputFM::block_right = NULL;
 unsigned long AudioOutputFM::us = 0;
@@ -61,10 +58,10 @@ typedef float fdata_t[I_NUM_SAMPLES];
 #if INTERPOLATION > 1
 static const unsigned interpolation_taps = 32;
 static const float n_att = 90.0; // desired stopband attenuation
-static const float interpol_cutoff = AUDIO_SAMPLE_RATE_EXACT / 2.0f; // 
-OCRAM32 float interpolation_coeffs[interpolation_taps];
-OCRAM32 float interpolation_L_state[NUM_SAMPLES + interpolation_taps / INTERPOLATION];
-OCRAM32 float interpolation_R_state[NUM_SAMPLES + interpolation_taps / INTERPOLATION];
+static const float interpol_cutoff = 15000; //
+static float interpolation_coeffs[interpolation_taps];
+static float interpolation_L_state[NUM_SAMPLES + interpolation_taps / INTERPOLATION];
+static float interpolation_R_state[NUM_SAMPLES + interpolation_taps / INTERPOLATION];
 static arm_fir_interpolate_instance_f32 interpolationL;
 static arm_fir_interpolate_instance_f32 interpolationR;
 #endif
@@ -110,24 +107,24 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
   // https://github.com/jontio/JMPX/blob/master/libJMPX/JDSP.cpp
   // TODO: uncomment this in case that a sample rate of 192ksps is used !
   // sample rate 192ksps
-  
+
   // ATTENTION: SampleRate 44.1 * 4 = 176kHz
-#if INTERPOLATION > 1 
-  
-    if(preemphasis == PREEMPHASIS_50)
-    {
-      pre_a0 = 5.309858008;
-      pre_a1 = -4.794606188;
-      pre_b = 0.4847481783;
-    }
-    else
-    {
-      pre_a0 = 7.681633687l;
-      pre_a1 = -7.170926091l;
-      pre_b = 0.4892924010l;
-    }
+#if INTERPOLATION > 1
+
+  if (preemphasis == PREEMPHASIS_50)
+  {
+    pre_a0 = 5.309858008;
+    pre_a1 = -4.794606188;
+    pre_b = 0.4847481783;
+  }
+  else
+  {
+    pre_a0 = 7.681633687l;
+    pre_a1 = -7.170926091l;
+    pre_b = 0.4892924010l;
+  }
 #else
-  //ATTENTION: 
+  //ATTENTION:
   // this is a more sophisticated pre-emphasis filter: https://jontio.zapto.org/download/preempiir.pdf
   // filter coefficients calculated for new sample rate of 44.1ksps by DD4WH, 2021-01-23
   // sample rate 44.1ksps
@@ -147,16 +144,16 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
 
 
 #if INTERPOLATION > 1
-   memset(interpolation_coeffs, 0, sizeof(interpolation_coeffs));
-   memset(interpolation_L_state, 0, sizeof(interpolation_L_state));
-   memset(interpolation_R_state, 0, sizeof(interpolation_R_state));
-  
+  memset(interpolation_coeffs, 0, sizeof(interpolation_coeffs));
+  memset(interpolation_L_state, 0, sizeof(interpolation_L_state));
+  memset(interpolation_R_state, 0, sizeof(interpolation_R_state));
+
   //calc_FIR_coeffs (float * coeffs_I, int numCoeffs, float fc, float Astop, int type, float dfc, float Fsamprate)
   // the interpolation filter is AFTER the upsampling, so it has to be in the target sample rate
   calc_FIR_coeffs(interpolation_coeffs, interpolation_taps, interpol_cutoff, n_att, 0, 0.0, AUDIO_SAMPLE_RATE_EXACT * INTERPOLATION);
 
   /*
-     arm_status arm_fir_interpolate_init_f32  (   
+     arm_status arm_fir_interpolate_init_f32  (
       arm_fir_interpolate_instance_f32 *    S,
       uint8_t   L,
       uint16_t    numTaps,
@@ -165,7 +162,7 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
       uint32_t    blockSize
     )
   */
-   // I think you should initiate the number of input samples, NOT the number of interpolated samples
+  // I think you should initiate the number of input samples, NOT the number of interpolated samples
   if (arm_fir_interpolate_init_f32(&interpolationL, INTERPOLATION, interpolation_taps, interpolation_coeffs, interpolation_L_state, NUM_SAMPLES) ||
       arm_fir_interpolate_init_f32(&interpolationR, INTERPOLATION, interpolation_taps, interpolation_coeffs, interpolation_R_state, NUM_SAMPLES))
   {
@@ -174,13 +171,13 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
   }
 
 #endif
-  
+
   int n1 = 2; //SAI prescaler
   int n2 = 1 + (24000000.0 * 27) / (FS * n1);
   double C = (FS * n1 * n2) / 24000000.0;
   int nfact = C;
   int nmult = C * ndiv - (nfact * ndiv);
-   
+
   CCM_ANALOG_PLL_VIDEO = CCM_ANALOG_PLL_VIDEO_BYPASS | CCM_ANALOG_PLL_VIDEO_ENABLE
                          | CCM_ANALOG_PLL_VIDEO_POST_DIV_SELECT(0) // 0: 1/4; 1: 1/2; 2: 1/1
                          | CCM_ANALOG_PLL_VIDEO_DIV_SELECT(nfact);
@@ -310,11 +307,12 @@ void AudioOutputFM::dmaISR()
   if ((uintptr_t)dma.TCD->SADDR < (uintptr_t)&fm_tx_buffer[I_NUM_SAMPLES]) {
     // DMA is transmitting the first half of the buffer
     // so we must fill the second half
-    process(AudioOutputFM::block_left, AudioOutputFM::block_right, 0);
+    process(AudioOutputFM::block_left, AudioOutputFM::block_right,  NUM_SAMPLES);
+    if (AudioOutputFM::update_responsibility) AudioStream::update_all();
   } else {
     //fill the first half
-    process(AudioOutputFM::block_left, AudioOutputFM::block_right, NUM_SAMPLES);
-    if (AudioOutputFM::update_responsibility) AudioStream::update_all();
+    process(AudioOutputFM::block_left, AudioOutputFM::block_right, 0);
+
   }
 
   us = 2 * ( micros() - us );
@@ -366,20 +364,14 @@ void process(audio_block_t *blockL, audio_block_t *blockR, unsigned offset)
 #if INTERPOLATION > 1
   fdata_t iL, iR;
 
-#if 0 
-  //simple - just copy the same sample 4 times (testing only)
-  for (unsigned i; i< NUM_SAMPLES; i++) {
-    iL[i*4] = iL[i*4 + 1] = iL[i*4 + 2] = iL[i*4 + 3] = bL[i];
-    iR[i*4] = iR[i*4 + 1] = iR[i*4 + 2] = iR[i*4 + 3] = bR[i];
-  }
-#else
+
   // interpolate
   arm_fir_interpolate_f32(&interpolationL, bL, iL, NUM_SAMPLES);
   arm_fir_interpolate_f32(&interpolationR, bR, iR, NUM_SAMPLES);
   //Scaling after interpolation
   arm_scale_f32(iL, (float)INTERPOLATION, iL, I_NUM_SAMPLES);
   arm_scale_f32(iR, (float)INTERPOLATION, iR, I_NUM_SAMPLES);
-#endif
+
 
   offset *= INTERPOLATION;
   if (AudioOutputFM::mono) {
@@ -416,7 +408,7 @@ static void processMono(fdata_t blockL, fdata_t blockR, const unsigned offset)
   {
     sample = (blockL[idx] + blockR[idx]) / 2.0f;
 
-#if !PREEMPHASIS_DISABLE
+
     float tmp = sample;
 
     // pre-emphasis filter: https://jontio.zapto.org/download/preempiir.pdf
@@ -424,7 +416,7 @@ static void processMono(fdata_t blockL, fdata_t blockR, const unsigned offset)
 
     sample = pre_a0 * sample + pre_a1 * lastInputSample + pre_b * sample;
     lastInputSample = tmp;
-#endif
+
 
     fm_tx_buffer[idx + offset] = calcPLLnmult(sample);
   }
