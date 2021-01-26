@@ -58,7 +58,7 @@ typedef float fdata_t[I_NUM_SAMPLES];
 
 #if INTERPOLATION > 1
 // Attention: interpolation_taps for the interpolation filter must be a multiple of the interpolation factor L (constant INTERPOLATION)
-static const unsigned interpolation_taps = 32;
+static const unsigned interpolation_taps = 64;
 static const float n_att = 90.0; // desired stopband attenuation
 static const float interpolation_cutoff = 15000.0f;  // AUDIO_SAMPLE_RATE_EXACT / 2.0f; // 
 static float interpolation_coeffs[interpolation_taps];
@@ -111,7 +111,7 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
     // https://github.com/jontio/JMPX/blob/master/libJMPX/JDSP.cpp
     // I put the formulas from his paper into the code here to calculate filter coeffs dynamically
     // based on sample rate, interpolation factor and pre emphasis time constant tau
-    double delta = 1.0 / (2.0 * PI * 20000.0);
+    double delta = 1.0 / (2.0 * PI * 16000.0);
     double tau = 50e-6;
     if(preemphasis == PREEMPHASIS_75)
     {
@@ -440,12 +440,12 @@ static void processStereo(fdata_t blockL, fdata_t blockR, const unsigned offset)
     pilot_acc = pilot_acc + pilot_inc;
     LminusR  = 0.5 * (sample_L - sample_R);               // generate LEFT minus RIGHT signal
     LplusR   = 0.5 * (sample_L + sample_R);               // generate LEFT plus RIGHT signal
-    sample = LplusR + (LminusR * sin(2.0f * pilot_acc));  // generate MPX signal with LEFT minus right DSB signal around 2*19kHz = 38kHz 
+    sample = LplusR + (LminusR * arm_sin_f32(2.0f * pilot_acc));  // generate MPX signal with LEFT minus right DSB signal around 2*19kHz = 38kHz 
     sample = sample * 0.9f;                               // 90% signal
-    sample = sample + 0.1f * sin(pilot_acc);              // 10% pilot tone at 19kHz
+    sample = sample + 0.1f * arm_sin_f32(pilot_acc);              // 10% pilot tone at 19kHz
 
     // TBD: RDS
-    // RDS carrier: sin(3.0f * pilot_acc)
+    // RDS carrier: arm_sin_f32(3.0f * pilot_acc)
 
    
     // wrap around pilot tone phase accumulator
