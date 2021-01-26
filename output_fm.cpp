@@ -103,12 +103,11 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
   FS = FM_MHz * 1000000 * 4;
 
 
-  // pre-emphasis has been based on the filter designed by Jonti
-  // use more sophisticated pre-emphasis filter: https://jontio.zapto.org/download/preempiir.pdf
-  // https://github.com/jontio/JMPX/blob/master/libJMPX/JDSP.cpp
-  // TODO: uncomment this in case that a sample rate of 192ksps is used !
-
-    // calculate filter coeffs dynamically
+    // pre-emphasis has been based on the more sophisticated Pre-emphasis filter designed by Jonti
+    // https://jontio.zapto.org/download/preempiir.pdf
+    // https://github.com/jontio/JMPX/blob/master/libJMPX/JDSP.cpp
+    // I put the formulas from his paper into the code here to calculate filter coeffs dynamically
+    // based on sample rate, interpolation factor and pre emphasis time constant tau
     double delta = 1.0 / (2.0 * PI * 20000.0);
     double tau = 50e-6;
     if(preemphasis == PREEMPHASIS_75)
@@ -122,7 +121,8 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
     double deltaP = pre_T / 2.0 * cotan(pre_T / 2.0 / delta);
     double pre_bP = sqrt(-tauP * tauP + sqrt(tauP * tauP * tauP * tauP + 8 * tauP * tauP * deltaP * deltaP)) * 0.5;
     double pre_aP = sqrt(2.0 * pre_bP * pre_bP + tauP * tauP);
-    pre_a0 = (2.0 * pre_aP + pre_T) / (2.0 * pre_bP + pre_T); Serial.println ("Pre-emphasis filter coefficients:"); Serial.println ("a0 = "); Serial.println(pre_a0);
+    Serial.print("Sample rate = "); Serial.print(INTERPOLATION); Serial.print(" x "); Serial.print(AUDIO_SAMPLE_RATE_EXACT); Serial.print(" = "); Serial.println(AUDIO_SAMPLE_RATE_EXACT * INTERPOLATION);
+    pre_a0 = (2.0 * pre_aP + pre_T) / (2.0 * pre_bP + pre_T); Serial.println ("Pre-emphasis filter coefficients:"); Serial.print ("a0 = "); Serial.println(pre_a0);
     pre_a1 = (pre_T - 2.0 * pre_aP) / (2.0 * pre_bP + pre_T); Serial.print ("a1 = ");Serial.println(pre_a1);
     pre_b1 = (2.0 * pre_bP - pre_T) / (2.0 * pre_bP + pre_T); Serial.print ("b1 = ");Serial.println(pre_b1);   
 
