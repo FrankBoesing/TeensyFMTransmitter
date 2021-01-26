@@ -1,6 +1,11 @@
 # TeensyFMTransmitter
 
-Very first version, with a lot TODOs, more a study than read to use.
+Prototype version, more a study than ready to use.
+
+* Pre-emphasis filter implemented
+* interpolation implemented in order to be able to accurately produce the MPX-signal
+* Stereo implemented
+
 
 DO NOT CONNECT A WIRE AS ANTENNA
 
