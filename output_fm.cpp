@@ -26,7 +26,8 @@
 
 #include "output_fm.h"
 
-#define INTERPOLATION 4
+// Attention: numTaps in the interpolation filter must be a multiple of the interpolation factor L
+#define INTERPOLATION 8
 
 #if !defined(INTERPOLATION) || INTERPOLATION < 1
 #error Set INTERPOLATION > 0 !
@@ -56,7 +57,8 @@ typedef float fdata_t[I_NUM_SAMPLES];
 
 
 #if INTERPOLATION > 1
-static const unsigned interpolation_taps = 32;
+// Attention: interpolation_taps for the interpolation filter must be a multiple of the interpolation factor L (constant INTERPOLATION)
+static const unsigned interpolation_taps = 64;
 static const float n_att = 90.0; // desired stopband attenuation
 static const float interpolation_cutoff = 15000.0f;  // AUDIO_SAMPLE_RATE_EXACT / 2.0f; // 
 static float interpolation_coeffs[interpolation_taps];
@@ -67,7 +69,7 @@ static arm_fir_interpolate_instance_f32 interpolationR;
 #endif
 
 
-//preemphasis:
+//preemphasis filter coefficients
 static float pre_a0;
 static float pre_a1;
 static float pre_b1;
@@ -146,7 +148,7 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
       uint32_t    blockSize
     )
   */
-  // I think you should initiate the number of input samples, NOT the number of interpolated samples
+  // we initiate the number of input samples, NOT the number of interpolated samples
   if (arm_fir_interpolate_init_f32(&interpolationL, INTERPOLATION, interpolation_taps, interpolation_coeffs, interpolation_L_state, NUM_SAMPLES) ||
       arm_fir_interpolate_init_f32(&interpolationR, INTERPOLATION, interpolation_taps, interpolation_coeffs, interpolation_R_state, NUM_SAMPLES))
   {
@@ -396,7 +398,6 @@ static void processMono(fdata_t blockL, fdata_t blockR, const unsigned offset)
     float tmp = sample;
 
     // pre-emphasis filter: https://jontio.zapto.org/download/preempiir.pdf
-    // https://github.com/jontio/JMPX/blob/master/libJMPX/JDSP.cpp
 
     sample = pre_a0 * sample + pre_a1 * lastInputSample + pre_b1 * sample;
     lastInputSample = tmp;
