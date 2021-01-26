@@ -2,6 +2,7 @@
 
 Prototype version, more a study than ready to use.
 
+* NO additional hardware needed.
 * processes audio from i.e. 44.1ksps WAV files on SD card
 * full integration into Audio Library
 * further processing @352.8 ksps sample rate
