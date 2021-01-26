@@ -58,7 +58,7 @@ typedef float fdata_t[I_NUM_SAMPLES];
 
 #if INTERPOLATION > 1
 // Attention: interpolation_taps for the interpolation filter must be a multiple of the interpolation factor L (constant INTERPOLATION)
-static const unsigned interpolation_taps = 64;
+static const unsigned interpolation_taps = 32;
 static const float n_att = 90.0; // desired stopband attenuation
 static const float interpolation_cutoff = 15000.0f;  // AUDIO_SAMPLE_RATE_EXACT / 2.0f; // 
 static float interpolation_coeffs[interpolation_taps];
@@ -412,35 +412,43 @@ static void processMono(fdata_t blockL, fdata_t blockR, const unsigned offset)
 
 static void processStereo(fdata_t blockL, fdata_t blockR, const unsigned offset)
 {
-  // https://github.com/ChristopheJacquet/PiFmRds/blob/master/src/fm_mpx.c   GPL-3.0
-//  const float carrier_38[] = {0.0, 0.8660254037844386, 0.8660254037844388, 1.2246467991473532e-16, -0.8660254037844384, -0.8660254037844386};
-//  const float carrier_19[] = {0.0, 0.5, 0.8660254037844386, 1.0, 0.8660254037844388, 0.5, 1.2246467991473532e-16, -0.5, -0.8660254037844384, -1.0, -0.8660254037844386, -0.5};
-    
-//  static int phase_38 = 0;
-//  static int phase_19 = 0;
-
   static float pilot_acc = 0;
-  const float  pilot_inc = 19000.0f * TWO_PI / (AUDIO_SAMPLE_RATE_EXACT*INTERPOLATION) ; // increment per sample ! 19kHz pilot tone & AUDIO_SAMPLE_RATE_EXACT*INTERPOLATION
+  const float  pilot_inc = 19000.0f * TWO_PI / (AUDIO_SAMPLE_RATE_EXACT*INTERPOLATION) ; // increment per sample for 19kHz pilot tone & AUDIO_SAMPLE_RATE_EXACT*INTERPOLATION
    
   float sample_L = 0;
   float sample_R = 0;
   float LminusR = 0;
   float LplusR  = 0;
 
-  static float lastInputSample = 0;
   float sample;
+  static float lastInputSampleL = 0;
+  static float lastInputSampleR = 0;
 
   for (unsigned idx = 0; idx < I_NUM_SAMPLES; idx++)
   {
+    // 1.) Pre-emphasis filter
+    //     https://jontio.zapto.org/download/preempiir.pdf
+    float tmp = blockL[idx];
+    sample_L = pre_a0 * tmp + pre_a1 * lastInputSampleL + pre_b1 * tmp;
+    lastInputSampleL = tmp;
+    tmp = blockR[idx];
+    sample_R = pre_a0 * tmp + pre_a1 * lastInputSampleR + pre_b1 * tmp;
+    lastInputSampleR = tmp;
+    
+    
+    // 2.) Create MPX signal    
     pilot_acc = pilot_acc + pilot_inc;
-    sample_L = blockL[idx];
-    sample_R = blockR[idx];
-    LminusR  = 0.5 * (sample_L - sample_R);
-    LplusR   = 0.5 * (sample_L + sample_R);
-    sample = LplusR + (LminusR * sin(2.0f * pilot_acc));
-    sample = sample * 0.9f;
-    sample = sample + 0.1f * sin(pilot_acc); 
+    LminusR  = 0.5 * (sample_L - sample_R);               // generate LEFT minus RIGHT signal
+    LplusR   = 0.5 * (sample_L + sample_R);               // generate LEFT plus RIGHT signal
+    sample = LplusR + (LminusR * sin(2.0f * pilot_acc));  // generate MPX signal with LEFT minus right DSB signal around 2*19kHz = 38kHz 
+    sample = sample * 0.9f;                               // 90% signal
+    sample = sample + 0.1f * sin(pilot_acc);              // 10% pilot tone at 19kHz
 
+    // TBD: RDS
+    // RDS carrier: sin(3.0f * pilot_acc)
+
+   
+    // wrap around pilot tone phase accumulator
     if(pilot_acc > TWO_PI)
     {
       pilot_acc = pilot_acc - TWO_PI;
@@ -449,22 +457,11 @@ static void processStereo(fdata_t blockL, fdata_t blockR, const unsigned offset)
     {
       pilot_acc = pilot_acc + TWO_PI; 
     }
-    
-//    float tmp = sample;
-
-    // pre-emphasis filter: https://jontio.zapto.org/download/preempiir.pdf
-
-//    sample = pre_a0 * sample + pre_a1 * lastInputSample + pre_b1 * sample;
-//    lastInputSample = tmp;
 
 
     fm_tx_buffer[idx + offset] = calcPLLnmult(sample);
   }
   
-  
-  //TBD: pre-emphasis
-  //TBD: add pilot-tone, process stereo
-  //TBD: RDS(?)
 }
 
 
