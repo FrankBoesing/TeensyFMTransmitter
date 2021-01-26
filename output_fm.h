@@ -12,7 +12,8 @@
   so as not to emit radio waves. Never use an antenna.
 
   Even if you are a licensed amateur radio operator, using TeensyFMTransmitter to transmit
-  radio waves on ham frequencies without any filtering between the Teensy and an antenna is most probably illegal because the square-wave carrier is very rich in harmonics, so the bandwidth requirements are likely not met.
+  radio waves on ham frequencies without any filtering between the Teensy and an antenna is most probably illegal
+  because the square-wave carrier is very rich in harmonics, so the bandwidth requirements are likely not met.
 
   I could not be held liable for any misuse of your own Teensy.
   Any experiment is made under your own responsibility.
@@ -29,24 +30,39 @@
 #include <Arduino.h>
 #include <AudioStream.h>
 #include <DMAChannel.h>
+#include <arm_math.h>
+#include <arm_const_structs.h>
 
-#define PREEMPHASIS_50        0   // use this if you are unsure where you are ;-)
-#define PREEMPHASIS_75        1   // use this if you are in the USA, Aruba, Bahamas, Colombia, Gambia, South Korea, Vatican State, Lithuania, Morocco, Mexico, Turkey or Ukraine [https://www.itu.int/dms_pubrec/itu-r/rec/bs/R-REC-BS.450-3-200111-S!!PDF-E.pdf]
+#define PREEMPHASIS_50        0   // use this if you are in Europe or elsewhere in the world
+#define PREEMPHASIS_75        1   // use this if you are in the Americas or South Korea
 
 class AudioOutputFM : public AudioStream
 {
-public:
-	AudioOutputFM(uint8_t pin, unsigned MHz, int preemphasis) : AudioStream(1, inputQueueArray) { begin(pin, MHz, preemphasis); }   
-  void begin(uint8_t pin, unsigned MHz, int preemphasis); 
-	virtual void update(void);	
-private:
-	static audio_block_t *block_left;
-	static bool update_responsibility;
-	audio_block_t *inputQueueArray[1];
+  public:
+    AudioOutputFM(uint8_t pin, unsigned MHz, int preemphasis) : AudioStream(2, inputQueueArray) {
+      begin(pin, MHz, preemphasis);
+    }
+    void begin(uint8_t pin, unsigned MHz, int preemphasis);
 
-	static DMAChannel dma;	
-  static void dmaISR(void);
+    void forceMono(bool enable) {
+      mono = enable;
+    };
 
+    unsigned long time_us(void) {
+      return us;
+    };
+
+    virtual void update(void);
+    static bool mono;
+
+  private:
+    static audio_block_t *block_left;
+    static audio_block_t *block_right;
+    static bool update_responsibility;
+    audio_block_t *inputQueueArray[2];
+    static DMAChannel dma;
+    static unsigned long us;
+    static void dmaISR(void);
 };
 
 #endif

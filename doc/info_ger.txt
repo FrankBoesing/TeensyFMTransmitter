@@ -7,15 +7,16 @@ Die ist der einfache Teil.
 Die im i.mx.rt eingebaute Video-PLL wird benutzt, um die Frequenz zu erzeugen.
 
 (Siehe dazu auch i.mxr.rt Referenz Manual V2, Seite 1016)
-Die PLL läuft mit der 4-fachen Frequenz
+Die PLL läuft mit der 8-fachen Frequenz 
 Eines der drei Audio-I2S Devices wird programmiert, die Video-PLL als Taktquelle zu nutzen.
-Auf dem Signalweg finden sich Teiler, die die erzeugte Frequenz durch 4 teilen.
+Auf dem Signalweg finden sich Teiler, die die erzeugte Frequenz durch 8 teilen.
 
 Also: 
 Gewünschte Frequenz: 100MHz
-Setze PLL auf 100 * 4 = 400MHz
-Im Signalweg eingebaute Teiler teilen wieder auf 100MHz herunter.
+Setze PLL auf 100 * 4 * 2 = 800MHz
+Im Signalweg eingebaute Teiler (PLL_VIDEO_POST_DIV_SELECT=0 -> Teiler durch 4, sowie SAI prescaler =3) teilen erst auf 200, dann auf 100MHz herunter.
 Umgesetzt auf die Registerwerte ist dies die Variable: FS = Frequenz * 10^6 * 4
+Die nocht notwendige Multiplikation mit 2 ist in weitere Berechnung eingebaut.
 
 Die Details der PLL-Konfiguration sind nicht weiter interessant, siehe Quellcode.
 
@@ -32,10 +33,8 @@ Die bisher feste Frequenz muss mit einem 150KHz Frequenzhub moduliert werden.
 Dazu werden die einzelnen 16-Bit Samples (int16_t), die einen Wertebereich von -32767 ..  32768 haben, mit einem festen Faktor multipliziert, der
 exakt +-75Khz ergibt:
 
-const double FM_deviation = 75000.0;
-const double FD = 4.0 * (1.0/32767.0) * FM_deviation;
+const double FM_deviation = 75000.0 * 4.0;
 
-(Wir erinnern uns: 4.0 * wegen der 4-fach höheren PLL-Frequenz)
 
 Die Audio-Library benutzt eine Sample Frequenz von 44.100Hz.
 D.h. Die Frequenz der PLL muss 44.100 mal in der Sekunde angepasst werden.
