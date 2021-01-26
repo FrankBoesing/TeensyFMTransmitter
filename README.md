@@ -2,9 +2,11 @@
 
 Prototype version, more a study than ready to use.
 
+* processes audio from 44.1ksps WAV files
+* further processing @352.8 ksps sample rate
 * Pre-emphasis filter implemented
-* interpolation implemented in order to be able to accurately produce the MPX-signal
-* Stereo implemented
+* interpolation-by-8 implemented in order to be able to accurately produce the MPX-signal
+* Stereo processing implemented
 
 
 DO NOT CONNECT A WIRE AS ANTENNA
