@@ -35,7 +35,7 @@
 
 AudioPlaySdWav           playWav1;
 //AudioOutputFM            audioOutput(30, 91.0, PREEMPHASIS_75); //Pin (23= I2S1, 30= I2S3, 33= I2S2) , Frequency in MHz, preemphasis
-AudioOutputFM            fm(33, 91.0, PREEMPHASIS_50); //Pin (23= I2S1, 30= I2S3, 33= I2S2) , Frequency in MHz, preemphasis
+AudioOutputFM            fm(33, 107.0, PREEMPHASIS_50); //Pin (23= I2S1, 30= I2S3, 33= I2S2) , Frequency in MHz, preemphasis
 AudioConnection          patchCord1(playWav1, 0, fm, 0);
 AudioConnection          patchCord2(playWav1, 1, fm, 1);
 

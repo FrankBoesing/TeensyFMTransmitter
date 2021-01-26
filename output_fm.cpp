@@ -58,7 +58,7 @@ typedef float fdata_t[I_NUM_SAMPLES];
 #if INTERPOLATION > 1
 static const unsigned interpolation_taps = 32;
 static const float n_att = 90.0; // desired stopband attenuation
-static const float interpol_cutoff = 15000; //
+static const float interpolation_cutoff = 15000.0f;  // AUDIO_SAMPLE_RATE_EXACT / 2.0f; // 
 static float interpolation_coeffs[interpolation_taps];
 static float interpolation_L_state[NUM_SAMPLES + interpolation_taps / INTERPOLATION];
 static float interpolation_R_state[NUM_SAMPLES + interpolation_taps / INTERPOLATION];
@@ -70,12 +70,13 @@ static arm_fir_interpolate_instance_f32 interpolationR;
 //preemphasis:
 static float pre_a0;
 static float pre_a1;
-static float pre_b;
+static float pre_b1;
 
 
 //forward declarations:
 extern "C" void xbar_connect(unsigned int input, unsigned int output);
 extern void calc_FIR_coeffs (float * coeffs_I, int numCoeffs, float fc, float Astop, int type, float dfc, float Fsamprate);
+extern double cotan(double i); 
 static void process(audio_block_t *blockL, audio_block_t *blockR, unsigned offset);
 static void processMono(fdata_t blockL, fdata_t blockR, const unsigned offset);
 static void processStereo(fdata_t blockL, fdata_t blockR, const unsigned offset);
@@ -102,45 +103,28 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
   FS = FM_MHz * 1000000 * 4;
 
 
-  // pre-emphasis has been based on the filter designed by Jonti
-  // use more sophisticated pre-emphasis filter: https://jontio.zapto.org/download/preempiir.pdf
-  // https://github.com/jontio/JMPX/blob/master/libJMPX/JDSP.cpp
-  // TODO: uncomment this in case that a sample rate of 192ksps is used !
-  // sample rate 192ksps
-
-  // ATTENTION: SampleRate 44.1 * 4 = 176kHz
-#if INTERPOLATION > 1
-
-  if (preemphasis == PREEMPHASIS_50)
-  {
-    pre_a0 = 5.309858008;
-    pre_a1 = -4.794606188;
-    pre_b = 0.4847481783;
-  }
-  else
-  {
-    pre_a0 = 7.681633687l;
-    pre_a1 = -7.170926091l;
-    pre_b = 0.4892924010l;
-  }
-#else
-  //ATTENTION:
-  // this is a more sophisticated pre-emphasis filter: https://jontio.zapto.org/download/preempiir.pdf
-  // filter coefficients calculated for new sample rate of 44.1ksps by DD4WH, 2021-01-23
-  // sample rate 44.1ksps
-  if (preemphasis == PREEMPHASIS_50)
-  {
-    pre_a0 = 4.655206052723760;
-    pre_a1 = -2.911399421812300;
-    pre_b = -0.743806630911458;
-  }
-  else
-  { // PREAMPHASIS_75
-    pre_a0 = 6.597864306804010;
-    pre_a1 = -4.854202108640480;
-    pre_b = -0.743662198163528;
-  }
-#endif
+    // pre-emphasis has been based on the more sophisticated Pre-emphasis filter designed by Jonti
+    // https://jontio.zapto.org/download/preempiir.pdf
+    // https://github.com/jontio/JMPX/blob/master/libJMPX/JDSP.cpp
+    // I put the formulas from his paper into the code here to calculate filter coeffs dynamically
+    // based on sample rate, interpolation factor and pre emphasis time constant tau
+    double delta = 1.0 / (2.0 * PI * 20000.0);
+    double tau = 50e-6;
+    if(preemphasis == PREEMPHASIS_75)
+    {
+      tau = 75e-6;
+    }
+    double pre_b = sqrt(-tau * tau + sqrt(tau * tau * tau * tau + 8.0 * tau * tau * delta * delta)) * 0.5;
+    double pre_a = sqrt(2.0 * pre_b * pre_b + tau * tau);
+    double pre_T = 1.0 / (AUDIO_SAMPLE_RATE_EXACT * INTERPOLATION);
+    double tauP = pre_T / 2.0 * cotan(pre_T / 2.0 / tau);
+    double deltaP = pre_T / 2.0 * cotan(pre_T / 2.0 / delta);
+    double pre_bP = sqrt(-tauP * tauP + sqrt(tauP * tauP * tauP * tauP + 8 * tauP * tauP * deltaP * deltaP)) * 0.5;
+    double pre_aP = sqrt(2.0 * pre_bP * pre_bP + tauP * tauP);
+    Serial.print("Sample rate = "); Serial.print(INTERPOLATION); Serial.print(" x "); Serial.print(AUDIO_SAMPLE_RATE_EXACT); Serial.print(" = "); Serial.println(AUDIO_SAMPLE_RATE_EXACT * INTERPOLATION);
+    pre_a0 = (2.0 * pre_aP + pre_T) / (2.0 * pre_bP + pre_T); Serial.println ("Pre-emphasis filter coefficients:"); Serial.print ("a0 = "); Serial.println(pre_a0);
+    pre_a1 = (pre_T - 2.0 * pre_aP) / (2.0 * pre_bP + pre_T); Serial.print ("a1 = ");Serial.println(pre_a1);
+    pre_b1 = (2.0 * pre_bP - pre_T) / (2.0 * pre_bP + pre_T); Serial.print ("b1 = ");Serial.println(pre_b1);   
 
 
 #if INTERPOLATION > 1
@@ -150,7 +134,7 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
 
   //calc_FIR_coeffs (float * coeffs_I, int numCoeffs, float fc, float Astop, int type, float dfc, float Fsamprate)
   // the interpolation filter is AFTER the upsampling, so it has to be in the target sample rate
-  calc_FIR_coeffs(interpolation_coeffs, interpolation_taps, interpol_cutoff, n_att, 0, 0.0, AUDIO_SAMPLE_RATE_EXACT * INTERPOLATION);
+  calc_FIR_coeffs(interpolation_coeffs, interpolation_taps, interpolation_cutoff, n_att, 0, 0.0, AUDIO_SAMPLE_RATE_EXACT * INTERPOLATION);
 
   /*
      arm_status arm_fir_interpolate_init_f32  (
@@ -414,7 +398,7 @@ static void processMono(fdata_t blockL, fdata_t blockR, const unsigned offset)
     // pre-emphasis filter: https://jontio.zapto.org/download/preempiir.pdf
     // https://github.com/jontio/JMPX/blob/master/libJMPX/JDSP.cpp
 
-    sample = pre_a0 * sample + pre_a1 * lastInputSample + pre_b * sample;
+    sample = pre_a0 * sample + pre_a1 * lastInputSample + pre_b1 * sample;
     lastInputSample = tmp;
 
 
