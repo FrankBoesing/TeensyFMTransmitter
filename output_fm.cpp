@@ -99,7 +99,8 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
 
   dma.begin(true); // Allocate the DMA channel first
 
-  mono = true;
+//  mono = true;
+  mono = false;
 
   FM_MHz = MHz;
   FS = FM_MHz * 1000000 * 4;
@@ -411,6 +412,56 @@ static void processMono(fdata_t blockL, fdata_t blockR, const unsigned offset)
 
 static void processStereo(fdata_t blockL, fdata_t blockR, const unsigned offset)
 {
+  // https://github.com/ChristopheJacquet/PiFmRds/blob/master/src/fm_mpx.c   GPL-3.0
+//  const float carrier_38[] = {0.0, 0.8660254037844386, 0.8660254037844388, 1.2246467991473532e-16, -0.8660254037844384, -0.8660254037844386};
+//  const float carrier_19[] = {0.0, 0.5, 0.8660254037844386, 1.0, 0.8660254037844388, 0.5, 1.2246467991473532e-16, -0.5, -0.8660254037844384, -1.0, -0.8660254037844386, -0.5};
+    
+//  static int phase_38 = 0;
+//  static int phase_19 = 0;
+
+  static float pilot_acc = 0;
+  const float  pilot_inc = 19000.0f * TWO_PI / (AUDIO_SAMPLE_RATE_EXACT*INTERPOLATION) ; // increment per sample ! 19kHz pilot tone & AUDIO_SAMPLE_RATE_EXACT*INTERPOLATION
+   
+  float sample_L = 0;
+  float sample_R = 0;
+  float LminusR = 0;
+  float LplusR  = 0;
+
+  static float lastInputSample = 0;
+  float sample;
+
+  for (unsigned idx = 0; idx < I_NUM_SAMPLES; idx++)
+  {
+    pilot_acc = pilot_acc + pilot_inc;
+    sample_L = blockL[idx];
+    sample_R = blockR[idx];
+    LminusR  = 0.5 * (sample_L - sample_R);
+    LplusR   = 0.5 * (sample_L + sample_R);
+    sample = LplusR + (LminusR * sin(2.0f * pilot_acc));
+    sample = sample * 0.9f;
+    sample = sample + 0.1f * sin(pilot_acc); 
+
+    if(pilot_acc > TWO_PI)
+    {
+      pilot_acc = pilot_acc - TWO_PI;
+    }
+    else if (pilot_acc < -TWO_PI)
+    {
+      pilot_acc = pilot_acc + TWO_PI; 
+    }
+    
+//    float tmp = sample;
+
+    // pre-emphasis filter: https://jontio.zapto.org/download/preempiir.pdf
+
+//    sample = pre_a0 * sample + pre_a1 * lastInputSample + pre_b1 * sample;
+//    lastInputSample = tmp;
+
+
+    fm_tx_buffer[idx + offset] = calcPLLnmult(sample);
+  }
+  
+  
   //TBD: pre-emphasis
   //TBD: add pilot-tone, process stereo
   //TBD: RDS(?)
