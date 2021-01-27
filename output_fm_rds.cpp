@@ -1,14 +1,29 @@
+#if 1
 
 #include "output_fm.h"
 
-#if 0
-
 //https://versaweb.dl.sourceforge.net/project/cutesdr/doc/CuteSDR102.pdf
 
-#define NUMBITS 1
-#define RDS_BITRATE 1
-#define NUMBITS_MSG 1
-const m_RdsTime 
+#define RDS_BITRATE (57000.0f / 48.0f)
+#define NUMBITS_MSG 16
+
+static const int m_RdsPulseCoef_len = AUDIO_SAMPLE_RATE_EXACT * INTERPOLATION * 2 / RDS_BITRATE; // 2 Bits!
+static float m_RdsPulseCoef[m_RdsPulseCoef_len];
+
+FLASHMEM
+void rds_begin() {
+  //while (!Serial);
+  //Serial.printf("RDS Koeffizenten: %d\n", m_RdsPulseCoef_len);
+  
+  for (int i = - m_RdsPulseCoef_len / 2; i < m_RdsPulseCoef_len / 2; i++) {
+    double x = i * 2.0 / m_RdsPulseCoef_len;
+    double y = 3.0 / 4.0 * cos(4.0 * PI * x) * ((1.0 / (1.0 / x - 64.0 * x)) - (1.0 / (9.0 / x - 64.0 * x)));
+    m_RdsPulseCoef[i + m_RdsPulseCoef_len / 2] = y;
+    //Serial.printf("%4d : %3.10f\n", i, y);
+  }
+}
+
+
 
 //Generatormatrix from RDS spec for creating check sum word
 static
@@ -52,6 +67,23 @@ uint32_t CreateBlockWithCheckword(uint32_t Data, uint32_t BlockOffset)
   return block;
 }
 
+/*
+  //differential encode output bit by XOR with previous output bit
+  //return +1.0 for a '1' and -1.0 fora '0'
+  
+  if(m_RdsLastBit^bit)
+  {
+   m_RdsLastBit=1;
+   return 1.0;
+  } else {
+    m_RdsLastBit=0;
+    return -1.0;
+  }
+
+*/
+#if 0
+
+
 void CreateRdsSamples(int InLength, float *pBuf)
 {
   int n1;
@@ -75,6 +107,10 @@ void CreateRdsSamples(int InLength, float *pBuf)
     m_RdsTime += m_RdsSamplePeriod;
     if (m_RdsTime >= rds2period) m_RdsTime -= rds2period;
   }
+}
+#endif
+float rds_sample() {
+ return 0.0f; //TBD
 }
 
 #endif

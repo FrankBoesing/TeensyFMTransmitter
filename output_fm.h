@@ -36,6 +36,8 @@
 #define PREEMPHASIS_50        0   // use this if you are in Europe or elsewhere in the world
 #define PREEMPHASIS_75        1   // use this if you are in the Americas or South Korea
 
+#define INTERPOLATION 8
+
 class AudioOutputFM : public AudioStream
 {
   public:
@@ -64,6 +66,10 @@ class AudioOutputFM : public AudioStream
     static unsigned long us;
     static void dmaISR(void);
 };
+
+#if !defined(INTERPOLATION) || INTERPOLATION < 1
+#error Set INTERPOLATION > 0 !
+#endif
 
 #endif
 #endif

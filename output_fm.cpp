@@ -27,11 +27,7 @@
 #include "output_fm.h"
 
 // Attention: numTaps in the interpolation filter must be a multiple of the interpolation factor L
-#define INTERPOLATION 8
 
-#if !defined(INTERPOLATION) || INTERPOLATION < 1
-#error Set INTERPOLATION > 0 !
-#endif
 
 #define NUM_SAMPLES (AUDIO_BLOCK_SAMPLES / 2) //Input samples
 #define I_NUM_SAMPLES (NUM_SAMPLES * INTERPOLATION)
@@ -75,10 +71,12 @@ static float pre_a1;
 static float pre_b1;
 
 
-//forward declarations:
+//extern and forward declarations:
 extern "C" void xbar_connect(unsigned int input, unsigned int output);
 extern void calc_FIR_coeffs (float * coeffs_I, int numCoeffs, float fc, float Astop, int type, float dfc, float Fsamprate);
 extern double cotan(double i); 
+extern void rds_begin();
+extern float rds_sample();
 static void process(audio_block_t *blockL, audio_block_t *blockR, unsigned offset);
 static void processMono(fdata_t blockL, fdata_t blockR, const unsigned offset);
 static void processStereo(fdata_t blockL, fdata_t blockR, const unsigned offset);
@@ -444,9 +442,10 @@ static void processStereo(fdata_t blockL, fdata_t blockR, const unsigned offset)
     sample = sample * 0.9f;                               // 90% signal
     sample = sample + 0.1f * arm_sin_f32(pilot_acc);              // 10% pilot tone at 19kHz
 
-    // TBD: RDS
+    // Add RDS sample
     // RDS carrier: arm_sin_f32(3.0f * pilot_acc)
-
+    // TBD: RDS    
+    sample = sample + rds_sample() * arm_sin_f32(3.0f * pilot_acc);
    
     // wrap around pilot tone phase accumulator
     if(pilot_acc > TWO_PI)
@@ -457,7 +456,6 @@ static void processStereo(fdata_t blockL, fdata_t blockR, const unsigned offset)
     {
       pilot_acc = pilot_acc + TWO_PI; 
     }
-
 
     fm_tx_buffer[idx + offset] = calcPLLnmult(sample);
   }
