@@ -15,6 +15,8 @@ DO NOT CONNECT AN ANTENNA
 
 Teensy 4.x only
 
+![mpx](https://upload.wikimedia.org/wikipedia/commons/thumb/1/10/UKW-Rundfunk-Basisband.svg/320px-UKW-Rundfunk-Basisband.svg.png)
+
 ## Legal note
 TeensyFMTransmitter is an experimental program, designed only for experimentation. It is in no way intended to become a personal media center or a tool to operate a radio station, or even broadcast sound to one's own stereo system.
 
