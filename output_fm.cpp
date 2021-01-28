@@ -109,14 +109,14 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
     // https://github.com/jontio/JMPX/blob/master/libJMPX/JDSP.cpp
     // I put the formulas from his paper into the code here to calculate filter coeffs dynamically
     // based on sample rate, interpolation factor and pre emphasis time constant tau
-    double delta = 1.0 / (2.0 * PI * 16000.0);
+    double delta = 1.0 / (2.0 * PI * interpolation_cutoff);
     double tau = 50e-6;
     if(preemphasis == PREEMPHASIS_75)
     {
       tau = 75e-6;
     }
-    double pre_b = sqrt(-tau * tau + sqrt(tau * tau * tau * tau + 8.0 * tau * tau * delta * delta)) * 0.5;
-    double pre_a = sqrt(2.0 * pre_b * pre_b + tau * tau);
+
+
     double pre_T = 1.0 / (AUDIO_SAMPLE_RATE_EXACT * INTERPOLATION);
     double tauP = pre_T / 2.0 * cotan(pre_T / 2.0 / tau);
     double deltaP = pre_T / 2.0 * cotan(pre_T / 2.0 / delta);
