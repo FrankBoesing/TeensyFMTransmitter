@@ -37,7 +37,6 @@ DMAMEM static  __attribute__((aligned(32))) int fm_tx_buffer[I_NUM_SAMPLES * 2];
 audio_block_t * AudioOutputFM::block_left = NULL;
 audio_block_t * AudioOutputFM::block_right = NULL;
 unsigned long AudioOutputFM::us = 0;
-bool AudioOutputFM::mono;
 bool AudioOutputFM::update_responsibility = false;
 DMAChannel AudioOutputFM::dma(false);
 
@@ -56,7 +55,7 @@ typedef float fdata_t[I_NUM_SAMPLES];
 // Attention: interpolation_taps for the interpolation filter must be a multiple of the interpolation factor L (constant INTERPOLATION)
 static const unsigned interpolation_taps = 64;
 static const float n_att = 90.0; // desired stopband attenuation
-static const float interpolation_cutoff = 15000.0f;  // AUDIO_SAMPLE_RATE_EXACT / 2.0f; // 
+static const float interpolation_cutoff = 15000.0f;  // AUDIO_SAMPLE_RATE_EXACT / 2.0f; //
 static float interpolation_coeffs[interpolation_taps];
 static float interpolation_L_state[NUM_SAMPLES + interpolation_taps / INTERPOLATION];
 static float interpolation_R_state[NUM_SAMPLES + interpolation_taps / INTERPOLATION];
@@ -74,12 +73,12 @@ static float pre_b1;
 //extern and forward declarations:
 extern "C" void xbar_connect(unsigned int input, unsigned int output);
 extern void calc_FIR_coeffs (float * coeffs_I, int numCoeffs, float fc, float Astop, int type, float dfc, float Fsamprate);
-extern double cotan(double i); 
+extern double cotan(double i);
 extern void rds_begin();
+extern void rds_update();
 extern float rds_sample();
-static void process(audio_block_t *blockL, audio_block_t *blockR, unsigned offset);
-static void processMono(fdata_t blockL, fdata_t blockR, const unsigned offset);
-static void processStereo(fdata_t blockL, fdata_t blockR, const unsigned offset);
+static void process(const audio_block_t *blockL, const audio_block_t *blockR, unsigned offset);
+inline static void processStereo(fdata_t blockL, fdata_t blockR, const unsigned offset);
 
 
 // https://www.nxp.com/docs/en/application-note/AN5078.pdf
@@ -97,56 +96,35 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
 
   dma.begin(true); // Allocate the DMA channel first
 
-//  mono = true;
-  mono = false;
-
   FM_MHz = MHz;
-  FS = FM_MHz * 1000000 * 4;
+  FS = MHz * 1000000 * 4;
 
 
-    // pre-emphasis has been based on the more sophisticated Pre-emphasis filter designed by Jonti
-    // https://jontio.zapto.org/download/preempiir.pdf
-    // https://github.com/jontio/JMPX/blob/master/libJMPX/JDSP.cpp
-    // I put the formulas from his paper into the code here to calculate filter coeffs dynamically
-    // based on sample rate, interpolation factor and pre emphasis time constant tau
-    double delta = 1.0 / (2.0 * PI * interpolation_cutoff);
-    double tau = 50e-6;
-    if(preemphasis == PREEMPHASIS_75)
-    {
-      tau = 75e-6;
-    }
+  // pre-emphasis has been based on the more sophisticated Pre-emphasis filter designed by Jonti
+  // https://jontio.zapto.org/download/preempiir.pdf
+  // https://github.com/jontio/JMPX/blob/master/libJMPX/JDSP.cpp
+  // I put the formulas from his paper into the code here to calculate filter coeffs dynamically
+  // based on sample rate, interpolation factor and pre emphasis time constant tau
+  double delta = 1.0 / (2.0 * PI * 15000.0);
+  double tau = 50e-6;
+  if (preemphasis == PREEMPHASIS_75)
+  {
+    tau = 75e-6;
+  }
 
+  double pre_T = 1.0 / I_SAMPLERATE;
+  double tauP = pre_T / 2.0 * cotan(pre_T / 2.0 / tau);
+  double deltaP = pre_T / 2.0 * cotan(pre_T / 2.0 / delta);
+  double pre_bP = sqrt(-tauP * tauP + sqrt(tauP * tauP * tauP * tauP + 8 * tauP * tauP * deltaP * deltaP)) * 0.5;
+  double pre_aP = sqrt(2.0 * pre_bP * pre_bP + tauP * tauP);
 
-    double pre_T = 1.0 / (AUDIO_SAMPLE_RATE_EXACT * INTERPOLATION);
-    double tauP = pre_T / 2.0 * cotan(pre_T / 2.0 / tau);
-    double deltaP = pre_T / 2.0 * cotan(pre_T / 2.0 / delta);
-    double pre_bP = sqrt(-tauP * tauP + sqrt(tauP * tauP * tauP * tauP + 8 * tauP * tauP * deltaP * deltaP)) * 0.5;
-    double pre_aP = sqrt(2.0 * pre_bP * pre_bP + tauP * tauP);
-    Serial.print("Sample rate = "); Serial.print(INTERPOLATION); Serial.print(" x "); Serial.print(AUDIO_SAMPLE_RATE_EXACT); Serial.print(" = "); Serial.println(AUDIO_SAMPLE_RATE_EXACT * INTERPOLATION);
-    pre_a0 = (2.0 * pre_aP + pre_T) / (2.0 * pre_bP + pre_T); Serial.println ("Pre-emphasis filter coefficients:"); Serial.print ("a0 = "); Serial.println(pre_a0);
-    pre_a1 = (pre_T - 2.0 * pre_aP) / (2.0 * pre_bP + pre_T); Serial.print ("a1 = ");Serial.println(pre_a1);
-    pre_b1 = (2.0 * pre_bP - pre_T) / (2.0 * pre_bP + pre_T); Serial.print ("b1 = ");Serial.println(pre_b1);   
-
-
-#if INTERPOLATION > 1
-  memset(interpolation_coeffs, 0, sizeof(interpolation_coeffs));
-  memset(interpolation_L_state, 0, sizeof(interpolation_L_state));
-  memset(interpolation_R_state, 0, sizeof(interpolation_R_state));
+  pre_a0 = (2.0 * pre_aP + pre_T) / (2.0 * pre_bP + pre_T);
+  pre_a1 = (pre_T - 2.0 * pre_aP) / (2.0 * pre_bP + pre_T);
+  pre_b1 = (2.0 * pre_bP - pre_T) / (2.0 * pre_bP + pre_T);
 
   //calc_FIR_coeffs (float * coeffs_I, int numCoeffs, float fc, float Astop, int type, float dfc, float Fsamprate)
-  // the interpolation filter is AFTER the upsampling, so it has to be in the target sample rate
-  calc_FIR_coeffs(interpolation_coeffs, interpolation_taps, interpolation_cutoff, n_att, 0, 0.0, AUDIO_SAMPLE_RATE_EXACT * INTERPOLATION);
+  calc_FIR_coeffs(interpolation_coeffs, interpolation_taps, interpolation_cutoff, n_att, 0, 0.0, I_SAMPLERATE);
 
-  /*
-     arm_status arm_fir_interpolate_init_f32  (
-      arm_fir_interpolate_instance_f32 *    S,
-      uint8_t   L,
-      uint16_t    numTaps,
-      const float32_t *   pCoeffs,
-      float32_t *   pState,
-      uint32_t    blockSize
-    )
-  */
   // we initiate the number of input samples, NOT the number of interpolated samples
   if (arm_fir_interpolate_init_f32(&interpolationL, INTERPOLATION, interpolation_taps, interpolation_coeffs, interpolation_L_state, NUM_SAMPLES) ||
       arm_fir_interpolate_init_f32(&interpolationR, INTERPOLATION, interpolation_taps, interpolation_coeffs, interpolation_R_state, NUM_SAMPLES))
@@ -155,7 +133,7 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
     while (1);
   }
 
-#endif
+  rds_begin();
 
   int n1 = 2; //SAI prescaler
   int n2 = 1 + (24000000.0 * 27) / (FS * n1);
@@ -229,7 +207,7 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
   }
 
   //QTimer
-  const int comp1 = ((float)F_BUS_ACTUAL) / (INTERPOLATION * AUDIO_SAMPLE_RATE_EXACT / 2.0f) / 2.0f + 0.5f;
+  const int comp1 = I_TIMERVAL - 1;
   TMR4_ENBL &= ~(1 << 3); //Disable
   TMR4_SCTRL3 = TMR_SCTRL_OEN | TMR_SCTRL_FORCE;
   TMR4_CSCTRL3 = TMR_CSCTRL_CL1(1) /*| TMR_CSCTRL_TCF1EN*/;
@@ -270,7 +248,7 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
   dma.enable();
 
   update_responsibility = update_setup();
-
+  pinMode(13, OUTPUT);
 }
 
 //Update Audio Library Data:
@@ -297,13 +275,14 @@ void AudioOutputFM::dmaISR()
   } else {
     //fill the first half
     process(AudioOutputFM::block_left, AudioOutputFM::block_right, 0);
-
+    rds_update();
   }
 
   us = 2 * ( micros() - us );
   if (us > AudioOutputFM::us) AudioOutputFM::us = us;
 
   asm("dsb");
+  digitalWriteFast(13, !digitalReadFast(13));
 }
 
 
@@ -322,8 +301,8 @@ uint32_t calcPLLnmult(float fsample)
 }
 
 //Called for every (half-)block of samples:
-static
-void process(audio_block_t *blockL, audio_block_t *blockR, unsigned offset)
+static inline
+void process(const audio_block_t *blockL, const audio_block_t *blockR, unsigned offset)
 {
   if (blockL == nullptr) return;
 
@@ -339,86 +318,41 @@ void process(audio_block_t *blockL, audio_block_t *blockR, unsigned offset)
   } else {
     //blockR not filled: copy left channel.
     for (unsigned idx = 0; idx < NUM_SAMPLES; idx++) {
-      bL[idx] = blockL->data[idx + offset] / 32768.0f;
-      bR[idx] = bL[idx];
+      bR[idx] = bL[idx] = blockL->data[idx + offset] / 32768.0f;
     }
   }
 
 
   //interpolation:
-#if INTERPOLATION > 1
+
   fdata_t iL, iR;
 
-
-  // interpolate
   arm_fir_interpolate_f32(&interpolationL, bL, iL, NUM_SAMPLES);
   arm_fir_interpolate_f32(&interpolationR, bR, iR, NUM_SAMPLES);
   //Scaling after interpolation
-  arm_scale_f32(iL, (float)INTERPOLATION, iL, I_NUM_SAMPLES);
-  arm_scale_f32(iR, (float)INTERPOLATION, iR, I_NUM_SAMPLES);
-
+  //This is done later, so we can save some multiplications
+  //arm_scale_f32(iL, (float)INTERPOLATION, iL, I_NUM_SAMPLES);
+  //arm_scale_f32(iR, (float)INTERPOLATION, iR, I_NUM_SAMPLES);
 
   offset *= INTERPOLATION;
-  if (AudioOutputFM::mono) {
-    processMono(iL, iR, offset);
-  } else {
-    processStereo(iL, iR, offset);
-  }
-
-#else
-
-  if (AudioOutputFM::mono) {
-    processMono(bL, bR, offset);
-  } else {
-    processStereo(bL, bR, offset);
-  }
-
-#endif
-
+  processStereo(iL, iR, offset);
 
   //Flush cache to memory, so that DMA sees the new data
   arm_dcache_flush_delete(&fm_tx_buffer[offset], sizeof(fm_tx_buffer) / 2 );
 }
 
-
-
-
-static void processMono(fdata_t blockL, fdata_t blockR, const unsigned offset)
-{
-
-  static float lastInputSample = 0;
-  float sample;
-
-  for (unsigned idx = 0; idx < I_NUM_SAMPLES; idx++)
-  {
-    sample = (blockL[idx] + blockR[idx]) / 2.0f;
-
-
-    float tmp = sample;
-
-    // pre-emphasis filter: https://jontio.zapto.org/download/preempiir.pdf
-
-    sample = pre_a0 * sample + pre_a1 * lastInputSample + pre_b1 * sample;
-    lastInputSample = tmp;
-
-
-    fm_tx_buffer[idx + offset] = calcPLLnmult(sample);
-  }
-}
-
-
-
+inline
 static void processStereo(fdata_t blockL, fdata_t blockR, const unsigned offset)
 {
   static float pilot_acc = 0;
-  const float  pilot_inc = 19000.0f * TWO_PI / (AUDIO_SAMPLE_RATE_EXACT*INTERPOLATION) ; // increment per sample for 19kHz pilot tone & AUDIO_SAMPLE_RATE_EXACT*INTERPOLATION
-   
-  float sample_L = 0;
-  float sample_R = 0;
-  float LminusR = 0;
-  float LplusR  = 0;
+  const float  pilot_inc = 19000.0 * TWO_PI / I_SAMPLERATE  ; // increment per sample for 19kHz pilot tone & AUDIO_SAMPLE_RATE_EXACT*INTERPOLATION
 
-  float sample;
+  float sample, tmp;
+  float sample_L;
+  float sample_R;
+  float LminusR;
+  float LplusR;
+  
   static float lastInputSampleL = 0;
   static float lastInputSampleR = 0;
 
@@ -426,40 +360,31 @@ static void processStereo(fdata_t blockL, fdata_t blockR, const unsigned offset)
   {
     // 1.) Pre-emphasis filter
     //     https://jontio.zapto.org/download/preempiir.pdf
-    float tmp = blockL[idx];
+    tmp = blockL[idx];
     sample_L = pre_a0 * tmp + pre_a1 * lastInputSampleL + pre_b1 * tmp;
     lastInputSampleL = tmp;
     tmp = blockR[idx];
     sample_R = pre_a0 * tmp + pre_a1 * lastInputSampleR + pre_b1 * tmp;
     lastInputSampleR = tmp;
-    
-    
-    // 2.) Create MPX signal    
+
+    // 2.) Create MPX signal
     pilot_acc = pilot_acc + pilot_inc;
-    LminusR  = 0.5 * (sample_L - sample_R);               // generate LEFT minus RIGHT signal
-    LplusR   = 0.5 * (sample_L + sample_R);               // generate LEFT plus RIGHT signal
-    sample = LplusR + (LminusR * arm_sin_f32(2.0f * pilot_acc));  // generate MPX signal with LEFT minus right DSB signal around 2*19kHz = 38kHz 
-    sample = sample * 0.9f;                               // 90% signal
+
+    LminusR  = INTERPOLATION * 0.5f * (sample_L - sample_R);      // generate LEFT minus RIGHT signal
+    LplusR   = INTERPOLATION * 0.5f * (sample_L + sample_R);      // generate LEFT plus RIGHT signal
+    sample = LplusR + (LminusR * arm_sin_f32(2.0f * pilot_acc));  // generate MPX signal with LEFT minus right DSB signal around 2*19kHz = 38kHz
+    sample = sample * 0.85f;                                      // 85% signal
     sample = sample + 0.1f * arm_sin_f32(pilot_acc);              // 10% pilot tone at 19kHz
 
-    // Add RDS sample
-    // RDS carrier: arm_sin_f32(3.0f * pilot_acc)
-    // TBD: RDS    
-    sample = sample + rds_sample() * arm_sin_f32(3.0f * pilot_acc);
-   
+    // 3.) Add RDS sample:    
+    sample = sample + 0.5f * rds_sample() * arm_sin_f32(3.0f * pilot_acc); // 5% RDS (rds_sample() maxvalue 0.1)
+
     // wrap around pilot tone phase accumulator
-    if(pilot_acc > TWO_PI)
-    {
-      pilot_acc = pilot_acc - TWO_PI;
-    }
-    else if (pilot_acc < -TWO_PI)
-    {
-      pilot_acc = pilot_acc + TWO_PI; 
-    }
+    if (pilot_acc > (float)TWO_PI) pilot_acc -= (float)TWO_PI;
 
     fm_tx_buffer[idx + offset] = calcPLLnmult(sample);
   }
-  
+
 }
 
 

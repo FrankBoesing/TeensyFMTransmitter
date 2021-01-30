@@ -29,6 +29,7 @@
 
 #include <Arduino.h>
 #include <AudioStream.h>
+#include <utility/imxrt_hw.h>
 #include <DMAChannel.h>
 #include <arm_math.h>
 #include <arm_const_structs.h>
@@ -36,40 +37,57 @@
 #define PREEMPHASIS_50        0   // use this if you are in Europe or elsewhere in the world
 #define PREEMPHASIS_75        1   // use this if you are in the Americas or South Korea
 
-#define INTERPOLATION 8
+#define INTERPOLATION         8
 
-class AudioOutputFM : public AudioStream
+#define AUDIO_SAMPLERATE      44117.64706
+#define I_TIMERVAL            ((int)(((double)F_BUS_ACTUAL) / (((double)AUDIO_SAMPLERATE) * INTERPOLATION) + 0.5))
+#define I_SAMPLERATE          (((double)AUDIO_SAMPLERATE) * INTERPOLATION)
+
+/*
+class rds : public Print
+{
+  public: rds() {};
+ 
+  virtual size_t write(uint8_t) {return 1;};
+  virtual size_t write(const uint8_t *buffer, size_t size) {return size;};  
+  private:
+  void begin();
+  float rds_sample();
+};
+*/
+
+class AudioOutputFM : public AudioStream, public Print
 {
   public:
     AudioOutputFM(uint8_t pin, unsigned MHz, int preemphasis) : AudioStream(2, inputQueueArray) {
       begin(pin, MHz, preemphasis);
     }
-    void begin(uint8_t pin, unsigned MHz, int preemphasis);
-
-    void forceMono(bool enable) {
-      mono = enable;
-    };
-
     unsigned long time_us(void) {
       return us;
-    };
+    };    
 
-    virtual void update(void);
-    static bool mono;
-
-  private:
+    //RDS-Data:
+    void setPI(uint16_t _PI);
+    void setPTY(uint8_t _PTY);
+    void setTP(bool _TP);
+    void setTA(bool _TA);
+    void setPS(const char* PS);
+    void setRT(const char* RT);
+    virtual size_t write(uint8_t);
+    virtual size_t write(const uint8_t *buffer, size_t size);
+    bool transmitted();
+    
+  private:  
+    void begin(uint8_t pin, unsigned MHz, int preemphasis);
+    virtual void update(void);    
     static audio_block_t *block_left;
     static audio_block_t *block_right;
     static bool update_responsibility;
     audio_block_t *inputQueueArray[2];
     static DMAChannel dma;
     static unsigned long us;
-    static void dmaISR(void);
+    static void dmaISR(void);    
 };
-
-#if !defined(INTERPOLATION) || INTERPOLATION < 1
-#error Set INTERPOLATION > 0 !
-#endif
 
 #endif
 #endif

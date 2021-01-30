@@ -34,14 +34,13 @@
 #include "output_fm.h"
 
 AudioPlaySdWav           playWav1;
-//AudioOutputFM            audioOutput(30, 91.0, PREEMPHASIS_75); //Pin (23= I2S1, 30= I2S3, 33= I2S2) , Frequency in MHz, preemphasis
+//AudioOutputFM          fm(33, 91.0, PREEMPHASIS_75); //Pin (23= I2S1, 30= I2S3, 33= I2S2) , Frequency in MHz, preemphasis
 AudioOutputFM            fm(33, 107.0, PREEMPHASIS_50); //Pin (23= I2S1, 30= I2S3, 33= I2S2) , Frequency in MHz, preemphasis
 AudioConnection          patchCord1(playWav1, 0, fm, 0);
 AudioConnection          patchCord2(playWav1, 1, fm, 1);
 
 void setup() {
   AudioMemory(8);
-
   if (!(SD.begin(BUILTIN_SDCARD))) {
     while (1) {
       Serial.println("Unable to access the SD card");
@@ -49,6 +48,27 @@ void setup() {
     }
   }
 
+}
+
+void textStateMachine(const char *filename) 
+{
+  static int state = 0;
+  if (!fm.transmitted()) return;
+
+  switch (state) 
+  {
+    case 0 : fm.println();break;
+    case 1 : fm.print(filename);break;
+    case 2 : fm.println();break;
+    case 3 : fm.print("Peter Piper "); break;
+    case 4 : fm.print("picked"); break;
+    case 5 : fm.println(); break; //Clear screen
+    case 6 : fm.print("mixed pickles"); break;
+    case 7 : fm.println(); break; //Clear screen
+//    case 8 : fm.printf("PI is %f", (float)PI); <- does not work, bug
+//    case 9 : fm.println(); break; //Clear screen
+  }  
+  if (state++ > 7) state = 0;
 }
 
 void playFile(const char *filename)
@@ -62,7 +82,10 @@ void playFile(const char *filename)
     Serial.printf("Diagnostics AudioLib:%0.2f%% FM:%dus\n",
                   AudioProcessorUsage(), fm.time_us() );
 
-    delay(500);
+    delay(2000);
+    textStateMachine(filename);
+    
+    
   }
 }
 

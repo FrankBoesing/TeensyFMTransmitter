@@ -9,7 +9,7 @@ Prototype version, more a study than ready to use.
 * Pre-emphasis filter implemented
 * interpolation-by-8 implemented in order to be able to accurately produce the MPX-signal
 * Stereo processing implemented
-
+* RDS
 
 DO NOT CONNECT AN ANTENNA
 
