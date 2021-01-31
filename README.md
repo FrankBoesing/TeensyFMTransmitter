@@ -1,7 +1,5 @@
 # TeensyFMTransmitter
 
-Prototype version, more a study than ready to use.
-
 * NO additional hardware needed.
 * processes audio from i.e. 44.1ksps WAV files on SD card
 * full integration into Audio Library
@@ -13,7 +11,7 @@ Prototype version, more a study than ready to use.
 
 DO NOT CONNECT AN ANTENNA
 
-Teensy 4.x only
+Teensy 4.0 or 4.1 only
 
 ![mpx](https://upload.wikimedia.org/wikipedia/commons/thumb/1/10/UKW-Rundfunk-Basisband.svg/320px-UKW-Rundfunk-Basisband.svg.png)
 
