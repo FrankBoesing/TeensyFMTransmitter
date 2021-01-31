@@ -43,29 +43,16 @@
 #define I_TIMERVAL            ((int)(((double)F_BUS_ACTUAL) / (((double)AUDIO_SAMPLERATE) * INTERPOLATION) + 0.5))
 #define I_SAMPLERATE          (((double)AUDIO_SAMPLERATE) * INTERPOLATION)
 
-/*
-  class rds : public Print
-  {
-  public: rds() {};
-
-  virtual size_t write(uint8_t) {return 1;};
-  virtual size_t write(const uint8_t *buffer, size_t size) {return size;};
-  private:
-  void begin();
-  float rds_sample();
-  };
-*/
-
 class AudioOutputFM : public AudioStream, public Print
 {
   public:
-    AudioOutputFM(uint8_t pin, unsigned MHz, int preemphasis) : AudioStream(2, inputQueueArray) {
-      begin(pin, MHz, preemphasis);
-    }
-    unsigned long time_us(void) {
-      return us;
-    };
-
+    AudioOutputFM(uint8_t pin, unsigned MHz, int preemphasis) : AudioStream(2, inputQueueArray) { begin(pin, MHz, preemphasis); }
+    
+    void enable(bool enabled); //Enable / disable transmitter
+    bool enabled() { return this->isenabled; };
+    
+    unsigned long time_us(void) { return us; };
+    
     //RDS-Data:
     void setPI(uint16_t _PI);
     void setPTY(uint8_t _PTY);
@@ -75,6 +62,7 @@ class AudioOutputFM : public AudioStream, public Print
     bool transmitted();
     virtual size_t write(uint8_t);
     virtual size_t write(const uint8_t *buffer, size_t size);
+
   private:
     void begin(uint8_t pin, unsigned MHz, int preemphasis);
     virtual void update(void);
@@ -82,10 +70,13 @@ class AudioOutputFM : public AudioStream, public Print
     static audio_block_t *block_right;
     static bool update_responsibility;
     audio_block_t *inputQueueArray[2];
+    uint8_t pin = 0;
+    bool isenabled = false;
     static DMAChannel dma;
     static unsigned long us;
     static void dmaISR(void);
 };
+
 
 #endif
 #endif

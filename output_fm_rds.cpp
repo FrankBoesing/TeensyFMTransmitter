@@ -29,7 +29,7 @@
 
 
 
-#define MAX_RDS_DATA   1000  //max number of blocks that can be stored
+#define MAX_RDS_DATA   100  //max number of blocks that can be stored
 
 #define RDS_FREQUENCY  57000.0
 #define RDS_BITRATE    (RDS_FREQUENCY / 48.0)
@@ -52,8 +52,8 @@ static struct {
   int flag_TP;        // Traffic Program
   int flag_TA;        // Traffic Annoucenement
   int flag_MS;
-  char data_PS[8 + 1]; // Program Service name
-  char data_RT[64 + 1]; // Radio Text  
+  char data_PS[8]; // Program Service name
+  char data_RT[64]; // Radio Text
   bool flag_RTChanged;       // set when different text
   bool data_updated;
   bool group_transmitted;
@@ -92,35 +92,35 @@ FLASHMEM void AudioOutputFM::setPS(const char* PS)
 {
   int i = 0;
   while (i < 8 && *PS != 0) rds.data_PS[i++] = *PS++;
-  while (i < 8) rds.data_PS[i++] = ' ';  
+  while (i < 8) rds.data_PS[i++] = ' ';
   rds.data_updated = true;
 }
 
 size_t AudioOutputFM::write(uint8_t c) {
-  static int idx = 0;  
+  static int idx = 0;
   static char lastChar = '\0';
-  
+
   if (lastChar == '\r' && c == '\n')  return 1;
   lastChar = (char)c;
 
-  rds.flag_RTChanged = true;    
+  rds.flag_RTChanged = true;
   rds.data_updated = true;
-  
+
   if (c == 0x0a) {
-    idx = 0;    
-    memset((void*)&rds.data_RT,0,sizeof(rds.data_RT));    
-  }    
+    idx = 0;
+    memset((void*)&rds.data_RT, 0, sizeof(rds.data_RT));
+  }
   if (idx < 63) {
-    rds.data_RT[idx] = c;           
+    rds.data_RT[idx] = c;
     idx++;
-    if ( (c!='\r') && (idx < 64) && !(idx & 16) ) rds.data_RT[idx] = '\r';  
+    if ( (c != '\r') && (idx < 64) && ((idx & 0x1f) != 0x10) ) rds.data_RT[idx] = '\r';
     return 1;
   }
   return 0;
 };
 
 size_t AudioOutputFM::write(const uint8_t *buffer, size_t size)
-{  
+{
   for (unsigned i = 0; i < size; i++) if (!write(buffer[i])) break;
   return size;
 };
@@ -194,51 +194,66 @@ void rds_begin() {
   strncpy(rds.data_RT, "TeensyFMTransmitter compiled:" __DATE__ " " __TIME__ , sizeof(rds.data_RT) );
   rds.flag_RTChanged = true;
   rds.data_updated = true;
+  rds_update();  
 }
 
-void rds_update()
+
+//Creates the Program Service groups:
+inline void rds_groups_ps ()
 {
-  if (!rds.data_updated) return;
-
-  static int RT_AB = 0;
-  uint16_t b1, b2, b3, b4;
-  int group, di;
-
-  rds.BufLength = 0;
+  uint16_t b2, b4;
+  unsigned di;
+  const unsigned group = 0x01; // 0B
 
   //Group 0B for PS
   //PS: EN50067 Page 22
   //DI: EN50067 Page 41
-  group = 0x01; // 0B
-  b1 = b3 = rds.data_PI;
+
   for (unsigned i = 0; i < 4; i++) {
     if (i == 0) di = 0b100;
     else di = i;
-    b2 = (group << 11) | (rds.flag_TP << 10) | (rds.data_PTY << 5) | (rds.flag_TA << 4) | (rds.flag_MS << 3) | (di);
+    b2 = (group << 11) | ((rds.flag_TP & 0x01) << 10) | ((rds.data_PTY & 0x1f) << 5) | ((rds.flag_TA & 0x01) << 4) | ((rds.flag_MS & 0x01) << 3) | (di);
     char c1 = rds.data_PS[i * 2];
     char c2 = rds.data_PS[i * 2 + 1];
     b4 = ((uint16_t)c1 << 8) | c2;
-    CreateRdsGroup(b1, b2, b3, b4);
-    //Serial.printf("%04x %04x %04x %04x\n",b1, b2, b3, b4);
+    CreateRdsGroup(rds.data_PI, b2, rds.data_PI, b4);
+    //Serial.printf("%04x %04x %04x %04x\n",rds.data_PI, b2, rds.data_PI, b4);
   }
+}
+
+//Creates the Radio Text groups:
+inline void rds_groups_rt()
+{
+  static unsigned RT_AB = 0;
+  uint16_t b2, b3, b4;
+  const unsigned group = 0x04; // 2B
 
   //Group 2A for RT
   //RT: EN50067 Page 25
-  group = 0x04; // 2B
-  b1 = rds.data_PI;
+
+
+  if (rds.flag_RTChanged) RT_AB = !RT_AB & 0x01;
   int len = strlen(rds.data_RT);
-  if (rds.flag_RTChanged) RT_AB = (RT_AB + 1) & 0x01;
   for (int i = 0; i < (len / 4 + 1); i++) {
-    di = i;
-    b2 = (group << 11) | (rds.flag_TP << 10) | (rds.data_PTY << 5) | (RT_AB << 4) | di;
+    b2 = (group << 11) | ((rds.flag_TP & 0x01) << 10) | ((rds.data_PTY & 0x1f) << 5) | ((RT_AB & 0x01) << 4) | i;
     char c1 = rds.data_RT[i * 4];
     char c2 = rds.data_RT[i * 4 + 1];
     b3 = ((uint16_t)c1 << 8) | c2;
     char c3 = rds.data_RT[i * 4 + 2];
     char c4 = rds.data_RT[i * 4 + 3];
     b4 = ((uint16_t)c3 << 8) | c4;
-    CreateRdsGroup(b1, b2, b3, b4);
+    CreateRdsGroup(rds.data_PI, b2, b3, b4);
   }
+}
+
+void rds_update()
+{
+  if (!rds.data_updated) return;
+
+  rds.BufLength = 0;
+
+  rds_groups_ps();
+  rds_groups_rt();
 
   rds.group_transmitted = false;
   rds.data_updated = false;
@@ -268,7 +283,6 @@ uint32_t CreateBlockWithCheckword(uint16_t Data, uint32_t BlockOffset)
 //  Create a 4 block group from the parameters and create check words
 //Group data is placed in m_RdsDataBuf[] for continuous transmitting
 /////////////////////////////////////////////////////////////////////////////////
-FLASHMEM
 void CreateRdsGroup(uint16_t Blk1, uint16_t Blk2, uint16_t Blk3, uint16_t Blk4)
 {
   rds.DataBuf[rds.BufLength++] = CreateBlockWithCheckword(Blk1, OFFSET_WORD_BLOCK_A);
@@ -299,9 +313,10 @@ float CreateNextRdsBit()
     //reached end of 26bit word so go to next word in m_RdsDataBuf[]
     rds.BitPtr = (1 << 25);
     rds.BufPos++;
-    if (rds.BufPos >= rds.BufLength)
+    if (rds.BufPos >= rds.BufLength) {
       rds.BufPos = 0;  //reached end of m_RdsDataBuf[] so start over
-    rds.group_transmitted = true;
+      rds.group_transmitted = true;
+    }
   }
 
   //differential encode output bit by XOR with previous output bit

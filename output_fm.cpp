@@ -40,16 +40,21 @@ unsigned long AudioOutputFM::us = 0;
 bool AudioOutputFM::update_responsibility = false;
 DMAChannel AudioOutputFM::dma(false);
 
+static struct {
+  float FS; //PLL Frequency
+  int i2s_clk_pred;
+  int i2s_clk_podf;
+  float i2s_clk_divprod;
+} carrier;
 
-static double FM_MHz;
-static const double FM_deviation = 75000.0 * 4.0;
-static double FS; //PLL Frequency
 
-
+#define FM_DEVIATION        75000.0;
 #define PLL_FREF            24000000.0
 #define PLL_FREF_MULT       27.0
 #define PLL_DENOMINATOR     (1<<20)
 #define PLL_POST_DIV_SELECT 0    // 0: 1/4; 1: 1/2; 2: 1/1
+
+static const float FM_deviation = 4.0 * FM_DEVIATION;
 
 // Attention: interpolation_taps for the interpolation filter must be a multiple of the interpolation factor L (constant INTERPOLATION)
 static const unsigned interpolation_taps = 64;
@@ -91,9 +96,9 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
   memset(fm_tx_buffer, 0, sizeof(fm_tx_buffer));
 
   dma.begin(true); // Allocate the DMA channel first
+  pin = mclk_pin;
 
-  FM_MHz = MHz;
-  FS = MHz * 1000000 * 4;
+  carrier.FS = MHz * 1000000 * 4;
 
 
   // pre-emphasis has been based on the more sophisticated Pre-emphasis filter designed by Jonti
@@ -131,76 +136,24 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
 
   rds_begin();
 
-  int n1 = 1; //SAI prescaler
-  int n2 = 1 + (PLL_FREF * PLL_FREF_MULT) / (FS * n1);
-  double C = (FS * n1 * n2) / PLL_FREF;
+  carrier.i2s_clk_pred = 1; //SAI prescaler
+  carrier.i2s_clk_podf = 1 + (PLL_FREF * PLL_FREF_MULT) / (carrier.FS * carrier.i2s_clk_pred);
+  carrier.i2s_clk_divprod = carrier.i2s_clk_pred * carrier.i2s_clk_podf / PLL_FREF;
+  double C = carrier.FS * carrier.i2s_clk_divprod;
   int nfact = C;
-  int nmult = C * PLL_DENOMINATOR - (nfact * PLL_DENOMINATOR);
+  int mult = C * PLL_DENOMINATOR - (nfact * PLL_DENOMINATOR);
 
   CCM_ANALOG_PLL_VIDEO = CCM_ANALOG_PLL_VIDEO_BYPASS | CCM_ANALOG_PLL_VIDEO_ENABLE
                          | CCM_ANALOG_PLL_VIDEO_POST_DIV_SELECT(PLL_POST_DIV_SELECT) // 0: 1/4; 1: 1/2; 2: 1/1
                          | CCM_ANALOG_PLL_VIDEO_DIV_SELECT(nfact);
 
-  CCM_ANALOG_PLL_VIDEO_NUM   = nmult;
+  CCM_ANALOG_PLL_VIDEO_NUM   = mult;
   CCM_ANALOG_PLL_VIDEO_DENOM = PLL_DENOMINATOR;
 
   CCM_ANALOG_PLL_VIDEO &= ~CCM_ANALOG_PLL_VIDEO_POWERDOWN;//Switch on PLL
   while (!(CCM_ANALOG_PLL_VIDEO & CCM_ANALOG_PLL_VIDEO_LOCK)) {}; //Wait for pll-lock
 
   CCM_ANALOG_PLL_VIDEO &= ~CCM_ANALOG_PLL_VIDEO_BYPASS;//Disable Bypass
-
-  //ENABLE I2S
-  if (mclk_pin == 33) {
-    CCM_CCGR5 |= CCM_CCGR5_SAI2(CCM_CCGR_ON);
-    CCM_CSCMR1 = (CCM_CSCMR1 & ~(CCM_CSCMR1_SAI2_CLK_SEL_MASK))
-                 | CCM_CSCMR1_SAI2_CLK_SEL(1); // &0x03 // (0,1,2): PLL3PFD0, PLL5, PLL4,
-    CCM_CS2CDR = (CCM_CS2CDR & ~(CCM_CS2CDR_SAI2_CLK_PRED_MASK | CCM_CS2CDR_SAI2_CLK_PODF_MASK))
-                 | CCM_CS2CDR_SAI2_CLK_PRED(n1 - 1)
-                 | CCM_CS2CDR_SAI2_CLK_PODF(n2 - 1);
-    IOMUXC_GPR_GPR1 = (IOMUXC_GPR_GPR1 & ~(IOMUXC_GPR_GPR1_SAI2_MCLK3_SEL_MASK))
-                      | (IOMUXC_GPR_GPR1_SAI2_MCLK_DIR | IOMUXC_GPR_GPR1_SAI2_MCLK3_SEL(0));  //Select MCLK
-
-    I2S2_TMR = 0;
-    I2S2_TCR2 = I2S_TCR2_MSEL(1);
-    CORE_PIN33_CONFIG = 2;  // EMC_07, 2=SAI2_MCLK
-    CORE_PIN33_PADCONFIG = PADCONFIG;
-  }
-
-  else if (mclk_pin == 30) {
-    CCM_CCGR5 |= CCM_CCGR5_SAI3(CCM_CCGR_ON);
-    CCM_CSCMR1 = (CCM_CSCMR1 & ~(CCM_CSCMR1_SAI3_CLK_SEL_MASK))
-                 | CCM_CSCMR1_SAI3_CLK_SEL(1); // &0x03 // (0,1,2): PLL3PFD0, PLL5, PLL4,
-    CCM_CS1CDR = (CCM_CS1CDR & ~(CCM_CS1CDR_SAI3_CLK_PRED_MASK | CCM_CS1CDR_SAI3_CLK_PODF_MASK))
-                 | CCM_CS1CDR_SAI3_CLK_PRED(n1 - 1)
-                 | CCM_CS1CDR_SAI3_CLK_PODF(n2 - 1);
-    IOMUXC_GPR_GPR1 = (IOMUXC_GPR_GPR1 & ~(IOMUXC_GPR_GPR1_SAI3_MCLK3_SEL_MASK))
-                      | (IOMUXC_GPR_GPR1_SAI3_MCLK_DIR | IOMUXC_GPR_GPR1_SAI3_MCLK3_SEL(0));  //Select MCLK
-
-    I2S3_TMR = 0;
-    I2S3_TCR2 = I2S_TCR2_MSEL(1);
-    CORE_PIN30_CONFIG = 3; // EMC_37, 3=SAI3_MCLK
-    CORE_PIN30_PADCONFIG = PADCONFIG;
-  }
-
-  else if (mclk_pin == 23) {
-    CCM_CCGR5 |= CCM_CCGR5_SAI1(CCM_CCGR_ON);
-    CCM_CSCMR1 = (CCM_CSCMR1 & ~(CCM_CSCMR1_SAI1_CLK_SEL_MASK))
-                 | CCM_CSCMR1_SAI1_CLK_SEL(1); // &0x03 // (0,1,2): PLL3PFD0, PLL5, PLL4
-    CCM_CS1CDR = (CCM_CS1CDR & ~(CCM_CS1CDR_SAI1_CLK_PRED_MASK | CCM_CS1CDR_SAI1_CLK_PODF_MASK))
-                 | CCM_CS1CDR_SAI1_CLK_PRED(n1 - 1) // &0x07
-                 | CCM_CS1CDR_SAI1_CLK_PODF(n2 - 1); // &0x3f
-
-    // Select MCLK
-    IOMUXC_GPR_GPR1 = (IOMUXC_GPR_GPR1 & ~(IOMUXC_GPR_GPR1_SAI1_MCLK1_SEL_MASK))
-                      | (IOMUXC_GPR_GPR1_SAI1_MCLK_DIR | IOMUXC_GPR_GPR1_SAI1_MCLK1_SEL(0));
-
-    I2S1_TMR = 0;
-    I2S1_TCR2 = I2S_TCR2_MSEL(1);
-
-    CORE_PIN23_CONFIG = 3;
-    CORE_PIN23_PADCONFIG = PADCONFIG;
-
-  }
 
   //QTimer
   const int comp1 = I_TIMERVAL - 1;
@@ -242,9 +195,80 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
   dma.attachInterrupt(dmaISR);
 
   dma.enable();
-
   update_responsibility = update_setup();
-  pinMode(13, OUTPUT);
+  enable( true ); //Enable I2s
+}
+
+void AudioOutputFM::enable(bool enabled)
+{
+  switch (pin) {
+
+    case 33:
+      this->isenabled = enabled;
+      if (enabled) {
+        CCM_CCGR5 |= CCM_CCGR5_SAI2(CCM_CCGR_ON);
+        CCM_CSCMR1 = (CCM_CSCMR1 & ~(CCM_CSCMR1_SAI2_CLK_SEL_MASK))
+                     | CCM_CSCMR1_SAI2_CLK_SEL(1); // &0x03 // (0,1,2): PLL3PFD0, PLL5, PLL4,
+        CCM_CS2CDR = (CCM_CS2CDR & ~(CCM_CS2CDR_SAI2_CLK_PRED_MASK | CCM_CS2CDR_SAI2_CLK_PODF_MASK))
+                     | CCM_CS2CDR_SAI2_CLK_PRED(carrier.i2s_clk_pred - 1)
+                     | CCM_CS2CDR_SAI2_CLK_PODF(carrier.i2s_clk_podf - 1);
+        IOMUXC_GPR_GPR1 = (IOMUXC_GPR_GPR1 & ~(IOMUXC_GPR_GPR1_SAI2_MCLK3_SEL_MASK))
+                          | (IOMUXC_GPR_GPR1_SAI2_MCLK_DIR | IOMUXC_GPR_GPR1_SAI2_MCLK3_SEL(0));  //Select MCLK
+
+        I2S2_TMR = 0;
+        I2S2_TCR2 = I2S_TCR2_MSEL(1);
+        CORE_PIN33_CONFIG = 2;  // EMC_07, 2=SAI2_MCLK
+        CORE_PIN33_PADCONFIG = PADCONFIG;
+      } else {
+        CORE_PIN33_CONFIG = 0;
+      }
+      break;
+
+    case 30:
+      this->isenabled = enabled;
+      if (enabled) {
+        CCM_CCGR5 |= CCM_CCGR5_SAI3(CCM_CCGR_ON);
+        CCM_CSCMR1 = (CCM_CSCMR1 & ~(CCM_CSCMR1_SAI3_CLK_SEL_MASK))
+                     | CCM_CSCMR1_SAI3_CLK_SEL(1); // &0x03 // (0,1,2): PLL3PFD0, PLL5, PLL4,
+        CCM_CS1CDR = (CCM_CS1CDR & ~(CCM_CS1CDR_SAI3_CLK_PRED_MASK | CCM_CS1CDR_SAI3_CLK_PODF_MASK))
+                     | CCM_CS1CDR_SAI3_CLK_PRED(carrier.i2s_clk_pred - 1)
+                     | CCM_CS1CDR_SAI3_CLK_PODF(carrier.i2s_clk_podf - 1);
+        IOMUXC_GPR_GPR1 = (IOMUXC_GPR_GPR1 & ~(IOMUXC_GPR_GPR1_SAI3_MCLK3_SEL_MASK))
+                          | (IOMUXC_GPR_GPR1_SAI3_MCLK_DIR | IOMUXC_GPR_GPR1_SAI3_MCLK3_SEL(0));  //Select MCLK
+
+        I2S3_TMR = 0;
+        I2S3_TCR2 = I2S_TCR2_MSEL(1);
+        CORE_PIN30_CONFIG = 3; // EMC_37, 3=SAI3_MCLK
+        CORE_PIN30_PADCONFIG = PADCONFIG;
+      } else {
+        CORE_PIN30_CONFIG = 0;
+      }
+      break;
+
+    case 23:
+      this->isenabled = enabled;
+      if (enabled) {
+        CCM_CCGR5 |= CCM_CCGR5_SAI1(CCM_CCGR_ON);
+        CCM_CSCMR1 = (CCM_CSCMR1 & ~(CCM_CSCMR1_SAI1_CLK_SEL_MASK))
+                     | CCM_CSCMR1_SAI1_CLK_SEL(1); // &0x03 // (0,1,2): PLL3PFD0, PLL5, PLL4
+        CCM_CS1CDR = (CCM_CS1CDR & ~(CCM_CS1CDR_SAI1_CLK_PRED_MASK | CCM_CS1CDR_SAI1_CLK_PODF_MASK))
+                     | CCM_CS1CDR_SAI1_CLK_PRED(carrier.i2s_clk_pred - 1) // &0x07
+                     | CCM_CS1CDR_SAI1_CLK_PODF(carrier.i2s_clk_podf - 1); // &0x3f
+
+        // Select MCLK
+        IOMUXC_GPR_GPR1 = (IOMUXC_GPR_GPR1 & ~(IOMUXC_GPR_GPR1_SAI1_MCLK1_SEL_MASK))
+                          | (IOMUXC_GPR_GPR1_SAI1_MCLK_DIR | IOMUXC_GPR_GPR1_SAI1_MCLK1_SEL(0));
+        I2S1_TMR = 0;
+        I2S1_TCR2 = I2S_TCR2_MSEL(1);
+        CORE_PIN23_CONFIG = 3;
+        CORE_PIN23_PADCONFIG = PADCONFIG;
+      } else {
+        CORE_PIN23_CONFIG = 0;
+      }
+      break;
+    default:
+      this->isenabled = false;
+  }
 }
 
 //Update Audio Library Data:
@@ -281,25 +305,18 @@ void AudioOutputFM::dmaISR()
     t2 = micros() - t2;
     unsigned long us = t1 + t2;
     if (us > AudioOutputFM::us) AudioOutputFM::us = us;
-
   }
 
-  asm("dsb");
 }
-
 
 //Translates a sample to PLL multiplicator:
 static inline __attribute__ ((pure))
 uint32_t calcPLLnmult(float fsample)
 {
-  double fs = FS + FM_deviation * fsample;
-  const unsigned n1 = 1; //SAI prescaler
-  unsigned n2 = 1 + (PLL_FREF * PLL_FREF_MULT) / (fs * n1);
-
-  double C = (fs * (n1 * n2)) / PLL_FREF;
+  float C = (carrier.FS + FM_deviation * fsample) * carrier.i2s_clk_divprod;
   unsigned nfact = C;
-  uint32_t nmult = C * PLL_DENOMINATOR - (nfact * PLL_DENOMINATOR);
-  return nmult;
+  uint32_t mult = C * PLL_DENOMINATOR - (nfact * PLL_DENOMINATOR);
+  return mult;
 }
 
 //Called for every (half-)block of samples:
@@ -389,6 +406,5 @@ static void processStereo(const float blockL[I_NUM_SAMPLES], const float blockR[
   }
 
 }
-
 
 #endif

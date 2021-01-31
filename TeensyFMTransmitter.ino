@@ -43,20 +43,27 @@ AudioConnection          patchCord2(playWav1, 1, fm, 1);
 //no good: 90, 93, 96, 99, 102, 105 and all +-500kHz
 //good : 88, 89, 91, 92, 93, 94, 95, 97, 98, 100, 101, 103, 104, 106, 107
 
-void setup() {
+#define MAXRUNTIME      (10 * 60 * 1000) // 10 Minutes
+unsigned long starttime = millis();
+
+
+void setup() 
+{
   AudioMemory(8);
+
   if (!(SD.begin(BUILTIN_SDCARD))) {
     while (1) {
       Serial.println("Unable to access the SD card");
       delay(500);
     }
   }
+
   //optional:
   fm.setPI(42); //Program Identification-Nr
   fm.setPTY(1); //News
   fm.setTA(0);  //No Traffic Announcements
+  fm.setTP(0);  //No Traffic Program
   fm.setPS("Teensy"); //max 8 chars
-
 }
 
 //optional:
@@ -72,13 +79,12 @@ void textStateMachine(const char *filename)
 
   switch (state++)
   {
-    case 0 : fm.printf("\n%s\rDiag:\rAudio %2.2f%%\rFM:%2.2f%%", filename, AudioProcessorUsage(), (fm.time_us() / 2902.0f) * 100.0f ); break;
+    case 0 : fm.printf("\n%s\rDiag:\rAudio %2.2f%%\rFM: %2.2f%%", filename, AudioProcessorUsage(), (fm.time_us() / 2902.0f) * 100.0f ); break;
     case 1 : fm.println("\nPeter Piper "); break;
     case 2 : fm.printf("picked"); break;
     case 3 : fm.printf("\nmixed pickles."); break;
-    default : state = 0;
+    default : state = 0; break;
   }
-
 }
 
 void playFile(const char *filename)
@@ -87,14 +93,22 @@ void playFile(const char *filename)
   Serial.println(filename);
   playWav1.play(filename);
   delay(25);
-  while (playWav1.isPlaying()) {
-    Serial.printf("Diagnostics AudioLib:%0.2f%% FM:%dus\n", AudioProcessorUsage(), fm.time_us() );
-    textStateMachine(filename);
+  while (playWav1.isPlaying())
+  {
     delay(1500);
+    if ( fm.enabled() ) {
+       Serial.printf("Diagnostics AudioLib:%0.2f%% FM:%dus\n", AudioProcessorUsage(), fm.time_us() );
+       textStateMachine(filename);
+      unsigned runtime = millis() - starttime;
+      if (runtime > MAXRUNTIME) fm.enable(false); //disable transmitter      
+    } else 
+      Serial.println("Transmitter disabled");
+            
   }
 }
 
-void loop() {
+void loop() 
+{
   playFile("SDTEST2.WAV");  // filenames are always uppercase 8.3 format
   delay(500);
   playFile("SDTEST3.WAV");
