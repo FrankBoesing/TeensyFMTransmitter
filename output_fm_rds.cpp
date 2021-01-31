@@ -125,11 +125,7 @@ size_t AudioOutputFM::write(uint8_t c) {
 
 size_t AudioOutputFM::write(const uint8_t *buffer, size_t size)
 {
-  for (unsigned i = 0; i < size; i++)
-  {
-    uint8_t c = buffer[i];
-    if (!write(c)) return size;
-  }
+  for (unsigned i = 0; i < size; i++) if (!write(buffer[i])) break;
   return size;
 };
 
@@ -201,8 +197,6 @@ void rds_begin() {
   strncpy(rds.data_PS, "TeensyFM", sizeof(rds.data_PS) - 1 );
   strncpy(rds.data_RT, "TeensyFMTransmitter compiled:" __DATE__ " " __TIME__ , sizeof(rds.data_RT) );
   rds.data_updated = true;
-  //while(!Serial);
-  //rds_update();
 }
 
 void rds_update()
@@ -255,7 +249,6 @@ void rds_update()
 //  Create data blk with chkword from 16 bit 'Data' with 'BlockOffset'.
 // Returns 26 bit block with check word.
 /////////////////////////////////////////////////////////////////////////////////
-FLASHMEM
 uint32_t CreateBlockWithCheckword(uint16_t Data, uint32_t BlockOffset)
 {
   uint32_t block = (uint32_t)Data << 10; //put 16 msg data bits into block

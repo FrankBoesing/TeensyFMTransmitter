@@ -44,7 +44,15 @@ DMAChannel AudioOutputFM::dma(false);
 static double FM_MHz;
 static const double FM_deviation = 75000.0 * 4.0;
 static double FS; //PLL Frequency
-static const unsigned ndiv = 0xffffff;
+
+
+#define PLL_FREF            24000000.0
+#define PLL_FREF_MULT       27.0
+#define PLL_DENOMINATOR     (1<<20)
+#define PLL_POST_DIV_SELECT 0    // 0: 1/4; 1: 1/2; 2: 1/1
+
+
+
 
 
 typedef float fdata_t[I_NUM_SAMPLES];
@@ -135,18 +143,18 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
 
   rds_begin();
 
-  int n1 = 2; //SAI prescaler
-  int n2 = 1 + (24000000.0 * 27) / (FS * n1);
-  double C = (FS * n1 * n2) / 24000000.0;
+  int n1 = 1; //SAI prescaler
+  int n2 = 1 + (PLL_FREF * PLL_FREF_MULT) / (FS * n1);
+  double C = (FS * n1 * n2) / PLL_FREF;
   int nfact = C;
-  int nmult = C * ndiv - (nfact * ndiv);
+  int nmult = C * PLL_DENOMINATOR - (nfact * PLL_DENOMINATOR);
 
   CCM_ANALOG_PLL_VIDEO = CCM_ANALOG_PLL_VIDEO_BYPASS | CCM_ANALOG_PLL_VIDEO_ENABLE
-                         | CCM_ANALOG_PLL_VIDEO_POST_DIV_SELECT(0) // 0: 1/4; 1: 1/2; 2: 1/1
+                         | CCM_ANALOG_PLL_VIDEO_POST_DIV_SELECT(PLL_POST_DIV_SELECT) // 0: 1/4; 1: 1/2; 2: 1/1
                          | CCM_ANALOG_PLL_VIDEO_DIV_SELECT(nfact);
 
   CCM_ANALOG_PLL_VIDEO_NUM   = nmult;
-  CCM_ANALOG_PLL_VIDEO_DENOM = ndiv;
+  CCM_ANALOG_PLL_VIDEO_DENOM = PLL_DENOMINATOR;
 
   CCM_ANALOG_PLL_VIDEO &= ~CCM_ANALOG_PLL_VIDEO_POWERDOWN;//Switch on PLL
   while (!(CCM_ANALOG_PLL_VIDEO & CCM_ANALOG_PLL_VIDEO_LOCK)) {}; //Wait for pll-lock
@@ -291,12 +299,12 @@ static inline __attribute__ ((pure))
 uint32_t calcPLLnmult(float fsample)
 {
   double fs = FS + FM_deviation * fsample;
-  const unsigned n1 = 2; //SAI prescaler
-  unsigned n2 = 1 + (24000000.0 * 27) / (fs * n1);
+  const unsigned n1 = 1; //SAI prescaler
+  unsigned n2 = 1 + (PLL_FREF * PLL_FREF_MULT) / (fs * n1);
 
-  double C = (fs * (n1 * n2)) / 24000000.0;
+  double C = (fs * (n1 * n2)) / PLL_FREF;
   unsigned nfact = C;
-  uint32_t nmult = C * ndiv - (nfact * ndiv);
+  uint32_t nmult = C * PLL_DENOMINATOR - (nfact * PLL_DENOMINATOR);
   return nmult;
 }
 

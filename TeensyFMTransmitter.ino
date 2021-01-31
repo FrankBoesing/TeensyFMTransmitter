@@ -35,9 +35,13 @@
 
 AudioPlaySdWav           playWav1;
 //AudioOutputFM          fm(33, 91.0, PREEMPHASIS_75); //Pin (23= I2S1, 30= I2S3, 33= I2S2) , Frequency in MHz, preemphasis
-AudioOutputFM            fm(33, 107.0, PREEMPHASIS_50); //Pin (23= I2S1, 30= I2S3, 33= I2S2) , Frequency in MHz, preemphasis
+AudioOutputFM            fm(33, 107, PREEMPHASIS_50); //Pin (23= I2S1, 30= I2S3, 33= I2S2) , Frequency in MHz, preemphasis
 AudioConnection          patchCord1(playWav1, 0, fm, 0);
 AudioConnection          patchCord2(playWav1, 1, fm, 1);
+
+//Tested:
+//no good: 90, 93, 96, 99, 102, 105 and all +-500kHz
+//good : 88, 89, 91, 92, 93, 94, 95, 97, 98, 100, 101, 103, 104, 106, 107
 
 void setup() {
   AudioMemory(8);
@@ -50,25 +54,26 @@ void setup() {
 
 }
 
-void textStateMachine(const char *filename) 
+void textStateMachine(const char *filename)
 {
   static int state = 0;
   if (!fm.transmitted()) return;
 
-  switch (state) 
+  switch (state++)
   {
-    case 0 : fm.println();break;
-    case 1 : fm.print(filename);break;
-    case 2 : fm.println();break;
+    case 0 : fm.println(); break; //Clear screen
+    case 1 : fm.print(filename); break;
+    case 2 : fm.println(); break;
     case 3 : fm.print("Peter Piper "); break;
     case 4 : fm.print("picked"); break;
-    case 5 : fm.println(); break; //Clear screen
-    case 6 : fm.print("mixed pickles"); break;
-    case 7 : fm.println(); break; //Clear screen
-//    case 8 : fm.printf("PI is %f", (float)PI); <- does not work, bug
-//    case 9 : fm.println(); break; //Clear screen
-  }  
-  if (state++ > 7) state = 0;
+    case 5 : fm.println(); break;
+    case 6 : fm.print("mixed pickles."); break;
+    case 7 : fm.println(); break;
+    //    case 8 : fm.printf("PI is %f", (float)PI); <- does not work, bug
+    //    case 9 : fm.println(); break; //Clear screen
+    default : state = 0;
+  }
+
 }
 
 void playFile(const char *filename)
@@ -84,8 +89,6 @@ void playFile(const char *filename)
 
     delay(2000);
     textStateMachine(filename);
-    
-    
   }
 }
 
