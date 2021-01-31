@@ -51,26 +51,31 @@ void setup() {
       delay(500);
     }
   }
+  //optional:
+  fm.setPI(42); //Program Identification-Nr
+  fm.setPTY(1); //News
+  fm.setTA(0);  //No Traffic Announcements
+  fm.setPS("Teensy"); //max 8 chars
 
 }
 
+//optional:
 void textStateMachine(const char *filename)
 {
   static int state = 0;
   if (!fm.transmitted()) return;
 
+  // '\n' is "clear screen" in RDS protocol.
+  // the fm object filters "\r\n" -> it becomes "\r"
+  // But: '\r' "Carriage Return" does not work on all receivers.
+  // IF it works, it should be displayed as a new line.
+
   switch (state++)
   {
-    case 0 : fm.println(); break; //Clear screen
-    case 1 : fm.print(filename); break;
-    case 2 : fm.println(); break;
-    case 3 : fm.print("Peter Piper "); break;
-    case 4 : fm.print("picked"); break;
-    case 5 : fm.println(); break;
-    case 6 : fm.print("mixed pickles."); break;
-    case 7 : fm.println(); break;
-    //    case 8 : fm.printf("PI is %f", (float)PI); <- does not work, bug
-    //    case 9 : fm.println(); break; //Clear screen
+    case 0 : fm.printf("\n%s\rDiag:\rAudio %2.2f%%\rFM:%2.2f%%", filename, AudioProcessorUsage(), (fm.time_us() / 2902.0f) * 100.0f ); break;
+    case 1 : fm.println("\nPeter Piper "); break;
+    case 2 : fm.printf("picked"); break;
+    case 3 : fm.printf("\nmixed pickles."); break;
     default : state = 0;
   }
 
@@ -83,12 +88,9 @@ void playFile(const char *filename)
   playWav1.play(filename);
   delay(25);
   while (playWav1.isPlaying()) {
-
-    Serial.printf("Diagnostics AudioLib:%0.2f%% FM:%dus\n",
-                  AudioProcessorUsage(), fm.time_us() );
-
-    delay(2000);
+    Serial.printf("Diagnostics AudioLib:%0.2f%% FM:%dus\n", AudioProcessorUsage(), fm.time_us() );
     textStateMachine(filename);
+    delay(1500);
   }
 }
 

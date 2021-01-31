@@ -53,8 +53,8 @@ static struct {
   int flag_TA;        // Traffic Annoucenement
   int flag_MS;
   char data_PS[8 + 1]; // Program Service name
-  char data_RT[64 + 1]; // Radio Text
-  int flag_RTAB;       // set when different text
+  char data_RT[64 + 1]; // Radio Text  
+  bool flag_RTChanged;       // set when different text
   bool data_updated;
   bool group_transmitted;
 } rds;
@@ -90,41 +90,37 @@ FLASHMEM void AudioOutputFM::setTA(bool TA)
 
 FLASHMEM void AudioOutputFM::setPS(const char* PS)
 {
-  memset(rds.data_PS, ' ', sizeof(rds.data_PS) - 1);
-  strncpy(rds.data_PS, PS, sizeof(rds.data_PS) - 1);
-  rds.data_updated = true;
-}
-
-FLASHMEM void AudioOutputFM::setRT(const char* RT)
-{
-  memset(rds.data_RT, 0, sizeof(rds.data_RT) - 1);
-  strncpy(rds.data_RT, RT, sizeof(rds.data_RT) - 1);
-  int l = strlen(rds.data_RT);
-  if (l != 16 && l != 32 && l != 48 && l != 64) rds.data_RT[l + 1] = 0x0d;
-  rds.flag_RTAB = (rds.flag_RTAB + 1) & 0x01;
+  int i = 0;
+  while (i < 8 && *PS != 0) rds.data_PS[i++] = *PS++;
+  while (i < 8) rds.data_PS[i++] = ' ';  
   rds.data_updated = true;
 }
 
 size_t AudioOutputFM::write(uint8_t c) {
   static int idx = 0;  
+  static char lastChar = '\0';
+  
+  if (lastChar == '\r' && c == '\n')  return 1;
+  lastChar = (char)c;
 
+  rds.flag_RTChanged = true;    
+  rds.data_updated = true;
+  
   if (c == 0x0a) {
     idx = 0;    
-    memset((void*)&rds.data_RT,0,sizeof(rds.data_RT));
-    rds.flag_RTAB = (rds.flag_RTAB + 1) & 0x01;
+    memset((void*)&rds.data_RT,0,sizeof(rds.data_RT));    
   }    
-  rds.data_updated = true;
   if (idx < 63) {
     rds.data_RT[idx] = c;           
     idx++;
-    if (idx < 64) rds.data_RT[idx] = 0x0d;      
+    if ( (c!='\r') && (idx < 64) && !(idx & 16) ) rds.data_RT[idx] = '\r';  
     return 1;
   }
   return 0;
 };
 
 size_t AudioOutputFM::write(const uint8_t *buffer, size_t size)
-{
+{  
   for (unsigned i = 0; i < size; i++) if (!write(buffer[i])) break;
   return size;
 };
@@ -196,6 +192,7 @@ void rds_begin() {
   rds.data_PTY = 1;
   strncpy(rds.data_PS, "TeensyFM", sizeof(rds.data_PS) - 1 );
   strncpy(rds.data_RT, "TeensyFMTransmitter compiled:" __DATE__ " " __TIME__ , sizeof(rds.data_RT) );
+  rds.flag_RTChanged = true;
   rds.data_updated = true;
 }
 
@@ -203,6 +200,7 @@ void rds_update()
 {
   if (!rds.data_updated) return;
 
+  static int RT_AB = 0;
   uint16_t b1, b2, b3, b4;
   int group, di;
 
@@ -229,9 +227,10 @@ void rds_update()
   group = 0x04; // 2B
   b1 = rds.data_PI;
   int len = strlen(rds.data_RT);
+  if (rds.flag_RTChanged) RT_AB = (RT_AB + 1) & 0x01;
   for (int i = 0; i < (len / 4 + 1); i++) {
     di = i;
-    b2 = (group << 11) | (rds.flag_TP << 10) | (rds.data_PTY << 5) | (rds.flag_RTAB << 4) | di;
+    b2 = (group << 11) | (rds.flag_TP << 10) | (rds.data_PTY << 5) | (RT_AB << 4) | di;
     char c1 = rds.data_RT[i * 4];
     char c2 = rds.data_RT[i * 4 + 1];
     b3 = ((uint16_t)c1 << 8) | c2;

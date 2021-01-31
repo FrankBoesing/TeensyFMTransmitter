@@ -44,16 +44,16 @@
 #define I_SAMPLERATE          (((double)AUDIO_SAMPLERATE) * INTERPOLATION)
 
 /*
-class rds : public Print
-{
+  class rds : public Print
+  {
   public: rds() {};
- 
+
   virtual size_t write(uint8_t) {return 1;};
-  virtual size_t write(const uint8_t *buffer, size_t size) {return size;};  
+  virtual size_t write(const uint8_t *buffer, size_t size) {return size;};
   private:
   void begin();
   float rds_sample();
-};
+  };
 */
 
 class AudioOutputFM : public AudioStream, public Print
@@ -64,7 +64,7 @@ class AudioOutputFM : public AudioStream, public Print
     }
     unsigned long time_us(void) {
       return us;
-    };    
+    };
 
     //RDS-Data:
     void setPI(uint16_t _PI);
@@ -72,21 +72,19 @@ class AudioOutputFM : public AudioStream, public Print
     void setTP(bool _TP);
     void setTA(bool _TA);
     void setPS(const char* PS);
-    void setRT(const char* RT);
+    bool transmitted();
     virtual size_t write(uint8_t);
     virtual size_t write(const uint8_t *buffer, size_t size);
-    bool transmitted();
-    
-  private:  
+  private:
     void begin(uint8_t pin, unsigned MHz, int preemphasis);
-    virtual void update(void);    
+    virtual void update(void);
     static audio_block_t *block_left;
     static audio_block_t *block_right;
     static bool update_responsibility;
     audio_block_t *inputQueueArray[2];
     static DMAChannel dma;
     static unsigned long us;
-    static void dmaISR(void);    
+    static void dmaISR(void);
 };
 
 #endif

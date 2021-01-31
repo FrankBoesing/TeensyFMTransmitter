@@ -51,15 +51,6 @@ static double FS; //PLL Frequency
 #define PLL_DENOMINATOR     (1<<20)
 #define PLL_POST_DIV_SELECT 0    // 0: 1/4; 1: 1/2; 2: 1/1
 
-
-
-
-
-typedef float fdata_t[I_NUM_SAMPLES];
-
-
-
-#if INTERPOLATION > 1
 // Attention: interpolation_taps for the interpolation filter must be a multiple of the interpolation factor L (constant INTERPOLATION)
 static const unsigned interpolation_taps = 64;
 static const float n_att = 90.0; // desired stopband attenuation
@@ -69,14 +60,11 @@ static float interpolation_L_state[NUM_SAMPLES + interpolation_taps / INTERPOLAT
 static float interpolation_R_state[NUM_SAMPLES + interpolation_taps / INTERPOLATION];
 static arm_fir_interpolate_instance_f32 interpolationL;
 static arm_fir_interpolate_instance_f32 interpolationR;
-#endif
-
 
 //preemphasis filter coefficients
 static float pre_a0;
 static float pre_a1;
 static float pre_b1;
-
 
 //extern and forward declarations:
 extern "C" void xbar_connect(unsigned int input, unsigned int output);
@@ -86,7 +74,7 @@ extern void rds_begin();
 extern void rds_update();
 extern float rds_sample();
 static void process(const audio_block_t *blockL, const audio_block_t *blockR, unsigned offset);
-inline static void processStereo(fdata_t blockL, fdata_t blockR, const unsigned offset);
+inline static void processStereo(const float blockL[I_NUM_SAMPLES], const float blockR[I_NUM_SAMPLES], const unsigned offset);
 
 
 // https://www.nxp.com/docs/en/application-note/AN5078.pdf
@@ -271,26 +259,32 @@ void AudioOutputFM::update(void)
 //DMA interrupt:
 void AudioOutputFM::dmaISR()
 {
+  static unsigned long t1;
   dma.clearInterrupt();
 
-  unsigned long us = micros();
-
   if ((uintptr_t)dma.TCD->SADDR < (uintptr_t)&fm_tx_buffer[I_NUM_SAMPLES]) {
+
+    t1 = micros();
     // DMA is transmitting the first half of the buffer
     // so we must fill the second half
     process(AudioOutputFM::block_left, AudioOutputFM::block_right,  NUM_SAMPLES);
+    t1 = micros() - t1;
     if (AudioOutputFM::update_responsibility) AudioStream::update_all();
+
   } else {
+
     //fill the first half
+    unsigned long t2 = micros();
     process(AudioOutputFM::block_left, AudioOutputFM::block_right, 0);
+    //update RDS Data
     rds_update();
+    t2 = micros() - t2;
+    unsigned long us = t1 + t2;
+    if (us > AudioOutputFM::us) AudioOutputFM::us = us;
+
   }
 
-  us = 2 * ( micros() - us );
-  if (us > AudioOutputFM::us) AudioOutputFM::us = us;
-
   asm("dsb");
-  digitalWriteFast(13, !digitalReadFast(13));
 }
 
 
@@ -333,7 +327,8 @@ void process(const audio_block_t *blockL, const audio_block_t *blockR, unsigned 
 
   //interpolation:
 
-  fdata_t iL, iR;
+  float iL[I_NUM_SAMPLES];
+  float iR[I_NUM_SAMPLES];
 
   arm_fir_interpolate_f32(&interpolationL, bL, iL, NUM_SAMPLES);
   arm_fir_interpolate_f32(&interpolationR, bR, iR, NUM_SAMPLES);
@@ -350,7 +345,7 @@ void process(const audio_block_t *blockL, const audio_block_t *blockR, unsigned 
 }
 
 inline
-static void processStereo(fdata_t blockL, fdata_t blockR, const unsigned offset)
+static void processStereo(const float blockL[I_NUM_SAMPLES], const float blockR[I_NUM_SAMPLES], const unsigned offset)
 {
   static float pilot_acc = 0;
   const float  pilot_inc = 19000.0 * TWO_PI / I_SAMPLERATE  ; // increment per sample for 19kHz pilot tone & AUDIO_SAMPLE_RATE_EXACT*INTERPOLATION
@@ -360,7 +355,7 @@ static void processStereo(fdata_t blockL, fdata_t blockR, const unsigned offset)
   float sample_R;
   float LminusR;
   float LplusR;
-  
+
   static float lastInputSampleL = 0;
   static float lastInputSampleR = 0;
 
@@ -384,7 +379,7 @@ static void processStereo(fdata_t blockL, fdata_t blockR, const unsigned offset)
     sample = sample * 0.85f;                                      // 85% signal
     sample = sample + 0.1f * arm_sin_f32(pilot_acc);              // 10% pilot tone at 19kHz
 
-    // 3.) Add RDS sample:    
+    // 3.) Add RDS sample:
     sample = sample + 0.5f * rds_sample() * arm_sin_f32(3.0f * pilot_acc); // 5% RDS (rds_sample() maxvalue 0.1)
 
     // wrap around pilot tone phase accumulator
