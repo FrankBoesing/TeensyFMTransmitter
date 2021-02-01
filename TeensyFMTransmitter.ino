@@ -27,8 +27,6 @@
     2021, Frank B
 */
 
-
-
 #include <Audio.h>
 #include <SD.h>
 #include "output_fm.h"
@@ -39,7 +37,7 @@ AudioOutputFM            fm(33, 107, PREEMPHASIS_50); //Pin (23= I2S1, 30= I2S3,
 AudioConnection          patchCord1(playWav1, 0, fm, 0);
 AudioConnection          patchCord2(playWav1, 1, fm, 1);
 
-//Tested:
+//Tested Frequencies:
 //no good: 90, 93, 96, 99, 102, 105 and all +-500kHz
 //good : 88, 89, 91, 92, 93, 94, 95, 97, 98, 100, 101, 103, 104, 106, 107
 
@@ -47,7 +45,7 @@ AudioConnection          patchCord2(playWav1, 1, fm, 1);
 unsigned long starttime = millis();
 
 
-void setup() 
+void setup()
 {
   AudioMemory(8);
 
@@ -95,19 +93,21 @@ void playFile(const char *filename)
   delay(25);
   while (playWav1.isPlaying())
   {
+
     delay(1500);
+
     if ( fm.enabled() ) {
-       Serial.printf("Diagnostics AudioLib:%0.2f%% FM:%dus\n", AudioProcessorUsage(), fm.time_us() );
-       textStateMachine(filename);
+      Serial.printf("Diagnostics AudioLib:%0.2f%% FM:%dus\n", AudioProcessorUsage(), fm.time_us() );
+      textStateMachine(filename);
       unsigned runtime = millis() - starttime;
-      if (runtime > MAXRUNTIME) fm.enable(false); //disable transmitter      
-    } else 
+      if (runtime > MAXRUNTIME) fm.enable(false); //disable transmitter
+    } else
       Serial.println("Transmitter disabled");
-            
+
   }
 }
 
-void loop() 
+void loop()
 {
   playFile("SDTEST2.WAV");  // filenames are always uppercase 8.3 format
   delay(500);

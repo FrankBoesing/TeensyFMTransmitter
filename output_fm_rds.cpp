@@ -24,10 +24,10 @@
 
 #include "output_fm.h"
 
+#if INTERPOLATION >= 8
+
 //RDS generation according to CuteSDR, Moe Wheatley
 //https://versaweb.dl.sourceforge.net/project/cutesdr/doc/CuteSDR102.pdf
-
-
 
 #define MAX_RDS_DATA   100  //max number of blocks that can be stored
 
@@ -362,3 +362,5 @@ float rds_sample()
   //get both table values and add together for output sample value
   return rds.D1 * rds.PulseCoef[n1] + rds.D2 * rds.PulseCoef[n2];
 }
+
+#endif

@@ -195,8 +195,9 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
   dma.attachInterrupt(dmaISR);
 
   dma.enable();
-  update_responsibility = update_setup();
+  
   enable( true ); //Enable I2s
+  update_responsibility = update_setup();
 }
 
 void AudioOutputFM::enable(bool enabled)
@@ -300,8 +301,10 @@ void AudioOutputFM::dmaISR()
     //fill the first half
     unsigned long t2 = micros();
     process(AudioOutputFM::block_left, AudioOutputFM::block_right, 0);
+#if INTERPOLATION >= 8
     //update RDS Data
     rds_update();
+#endif    
     t2 = micros() - t2;
     unsigned long us = t1 + t2;
     if (us > AudioOutputFM::us) AudioOutputFM::us = us;
@@ -314,8 +317,7 @@ static inline __attribute__ ((pure))
 uint32_t calcPLLnmult(float fsample)
 {
   float C = (carrier.FS + FM_deviation * fsample) * carrier.i2s_clk_divprod;
-  unsigned nfact = C;
-  uint32_t mult = C * PLL_DENOMINATOR - (nfact * PLL_DENOMINATOR);
+  uint32_t mult = C * PLL_DENOMINATOR - ((int)C * PLL_DENOMINATOR);
   return mult;
 }
 
@@ -378,6 +380,7 @@ static void processStereo(const float blockL[I_NUM_SAMPLES], const float blockR[
 
   for (unsigned idx = 0; idx < I_NUM_SAMPLES; idx++)
   {
+#if INTERPOLATION >= 4 //Stereo
     // 1.) Pre-emphasis filter
     //     https://jontio.zapto.org/download/preempiir.pdf
     tmp = blockL[idx];
@@ -388,21 +391,34 @@ static void processStereo(const float blockL[I_NUM_SAMPLES], const float blockR[
     lastInputSampleR = tmp;
 
     // 2.) Create MPX signal
-    pilot_acc = pilot_acc + pilot_inc;
-
-    LminusR  = INTERPOLATION * 0.5f * (sample_L - sample_R);      // generate LEFT minus RIGHT signal
-    LplusR   = INTERPOLATION * 0.5f * (sample_L + sample_R);      // generate LEFT plus RIGHT signal
+    pilot_acc = pilot_acc + pilot_inc;    
+    LminusR  =  (sample_L - sample_R) * (INTERPOLATION / 2);      // generate LEFT minus RIGHT signal
+    LplusR   =  (sample_L + sample_R) * (INTERPOLATION / 2);      // generate LEFT plus RIGHT signal
     sample = LplusR + (LminusR * arm_sin_f32(2.0f * pilot_acc));  // generate MPX signal with LEFT minus right DSB signal around 2*19kHz = 38kHz
     sample = sample * 0.85f;                                      // 85% signal
     sample = sample + 0.1f * arm_sin_f32(pilot_acc);              // 10% pilot tone at 19kHz
 
+#if INTERPOLATION >= 8 //Interpolation is good enough to add RDS
     // 3.) Add RDS sample:
     sample = sample + 0.5f * rds_sample() * arm_sin_f32(3.0f * pilot_acc); // 5% RDS (rds_sample() maxvalue 0.1)
+#endif
 
-    // wrap around pilot tone phase accumulator
+    // 4.) wrap around pilot tone phase accumulator
     if (pilot_acc > (float)TWO_PI) pilot_acc -= (float)TWO_PI;
 
+    // 5. ) convert to PLL value and save.
     fm_tx_buffer[idx + offset] = calcPLLnmult(sample);
+
+#else // No Interpolation : do it mono
+    // 1.) Pre-emphasis filter
+    tmp = (blockL[idx] + blockR[idx]) * 0.5f;
+    sample = pre_a0 * tmp + pre_a1 * lastInputSampleL + pre_b1 * tmp;
+    lastInputSampleL = tmp;
+
+    // 2.) Create mono signal
+    fm_tx_buffer[idx + offset] = calcPLLnmult( sample );
+#endif
+
   }
 
 }
