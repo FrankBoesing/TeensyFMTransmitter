@@ -40,10 +40,16 @@
 #define INTERPOLATION         8
 
 #define AUDIO_SAMPLERATE      44117.64706
-#define I_TIMERVAL            ((int)(((double)F_BUS_ACTUAL) / (((double)AUDIO_SAMPLERATE) * INTERPOLATION) + 0.5))
-#define I_SAMPLERATE          (((double)AUDIO_SAMPLERATE) * INTERPOLATION)
+#define I_SAMPLERATE          (AUDIO_SAMPLERATE * INTERPOLATION)
 
-class AudioOutputFM : public AudioStream, public Print
+
+
+class AudioOutputFM : public AudioStream
+
+#if INTERPOLATION >= 8
+                    , public Print
+#endif
+
 {
   public:
     AudioOutputFM(uint8_t pin, unsigned MHz, int preemphasis) : AudioStream(2, inputQueueArray) { begin(pin, MHz, preemphasis); }
@@ -52,7 +58,8 @@ class AudioOutputFM : public AudioStream, public Print
     bool enabled() { return this->isenabled; };
     
     unsigned long time_us(void) { return us; };
-    
+
+#if INTERPOLATION >= 8
     //RDS-Data:
     void setPI(uint16_t _PI);
     void setPTY(uint8_t _PTY);
@@ -62,6 +69,7 @@ class AudioOutputFM : public AudioStream, public Print
     bool transmitted();
     virtual size_t write(uint8_t);
     virtual size_t write(const uint8_t *buffer, size_t size);
+#endif
 
   private:
     void begin(uint8_t pin, unsigned MHz, int preemphasis);

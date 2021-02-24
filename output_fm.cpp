@@ -26,12 +26,9 @@
 
 #include "output_fm.h"
 
-// Attention: numTaps in the interpolation filter must be a multiple of the interpolation factor L
-
-
 #define NUM_SAMPLES (AUDIO_BLOCK_SAMPLES / 2) //Input samples
 #define I_NUM_SAMPLES (NUM_SAMPLES * INTERPOLATION)
-
+#define I_TIMERVAL ((int)(((double)F_BUS_ACTUAL) / (AUDIO_SAMPLERATE * INTERPOLATION) + 0.5))
 
 DMAMEM static  __attribute__((aligned(32))) int fm_tx_buffer[I_NUM_SAMPLES * 2];
 audio_block_t * AudioOutputFM::block_left = NULL;
@@ -47,8 +44,9 @@ static struct {
   float i2s_clk_divprod;
 } carrier;
 
-
-#define FM_DEVIATION        75000.0;
+#define AUDIO_BANDWIDTH     15000.0
+#define FM_DEVIATION        75000.0
+#define FM_PILOT            19000.0
 #define PLL_FREF            24000000.0
 #define PLL_FREF_MULT       27.0
 #define PLL_DENOMINATOR     (1<<20)
@@ -57,12 +55,11 @@ static struct {
 static const float FM_deviation = 4.0 * FM_DEVIATION;
 
 // Attention: interpolation_taps for the interpolation filter must be a multiple of the interpolation factor L (constant INTERPOLATION)
-static const unsigned interpolation_taps = 64;
+static const unsigned interpolation_taps = 16 * INTERPOLATION;
 static const float n_att = 90.0; // desired stopband attenuation
-static const float interpolation_cutoff = 15000.0f;  // AUDIO_SAMPLE_RATE_EXACT / 2.0f; //
 static float interpolation_coeffs[interpolation_taps];
-static float interpolation_L_state[NUM_SAMPLES + interpolation_taps / INTERPOLATION];
-static float interpolation_R_state[NUM_SAMPLES + interpolation_taps / INTERPOLATION];
+static float interpolation_L_state[(NUM_SAMPLES-1) + interpolation_taps / INTERPOLATION];
+static float interpolation_R_state[(NUM_SAMPLES-1) + interpolation_taps / INTERPOLATION];
 static arm_fir_interpolate_instance_f32 interpolationL;
 static arm_fir_interpolate_instance_f32 interpolationR;
 
@@ -73,7 +70,7 @@ static float pre_b1;
 
 //extern and forward declarations:
 extern "C" void xbar_connect(unsigned int input, unsigned int output);
-extern void calc_FIR_coeffs (float * coeffs_I, int numCoeffs, float fc, float Astop, int type, float dfc, float Fsamprate);
+extern void calc_FIR_coeffs (float * coeffs_I, int numCoeffs, double fc, double Astop, int type, double dfc, double Fsamprate);
 extern double cotan(double i);
 extern void rds_begin();
 extern void rds_update();
@@ -106,7 +103,7 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
   // https://github.com/jontio/JMPX/blob/master/libJMPX/JDSP.cpp
   // I put the formulas from his paper into the code here to calculate filter coeffs dynamically
   // based on sample rate, interpolation factor and pre emphasis time constant tau
-  double delta = 1.0 / (2.0 * PI * 15000.0);
+  double delta = 1.0 / (2.0 * PI * AUDIO_BANDWIDTH);
   double tau = 50e-6;
   if (preemphasis == PREEMPHASIS_75)
   {
@@ -123,8 +120,9 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
   pre_a1 = (pre_T - 2.0 * pre_aP) / (2.0 * pre_bP + pre_T);
   pre_b1 = (2.0 * pre_bP - pre_T) / (2.0 * pre_bP + pre_T);
 
+#if INTERPOLATION >= 4
   //calc_FIR_coeffs (float * coeffs_I, int numCoeffs, float fc, float Astop, int type, float dfc, float Fsamprate)
-  calc_FIR_coeffs(interpolation_coeffs, interpolation_taps, interpolation_cutoff, n_att, 0, 0.0, I_SAMPLERATE);
+  calc_FIR_coeffs(interpolation_coeffs, interpolation_taps, AUDIO_BANDWIDTH, n_att, 0, 0.0, I_SAMPLERATE);
 
   // we initiate the number of input samples, NOT the number of interpolated samples
   if (arm_fir_interpolate_init_f32(&interpolationL, INTERPOLATION, interpolation_taps, interpolation_coeffs, interpolation_L_state, NUM_SAMPLES) ||
@@ -134,7 +132,10 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
     while (1);
   }
 
+#if INTERPOLATION >= 8
   rds_begin();
+#endif
+#endif
 
   carrier.i2s_clk_pred = 1; //SAI prescaler
   carrier.i2s_clk_podf = 1 + (PLL_FREF * PLL_FREF_MULT) / (carrier.FS * carrier.i2s_clk_pred);
@@ -198,6 +199,8 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
   
   enable( true ); //Enable I2s
   update_responsibility = update_setup();
+
+  //pinMode(13, OUTPUT);
 }
 
 void AudioOutputFM::enable(bool enabled)
@@ -288,16 +291,16 @@ void AudioOutputFM::dmaISR()
   dma.clearInterrupt();
 
   if ((uintptr_t)dma.TCD->SADDR < (uintptr_t)&fm_tx_buffer[I_NUM_SAMPLES]) {
-
+    //digitalWrite(13, HIGH);
     t1 = micros();
     // DMA is transmitting the first half of the buffer
     // so we must fill the second half
     process(AudioOutputFM::block_left, AudioOutputFM::block_right,  NUM_SAMPLES);
     t1 = micros() - t1;
     if (AudioOutputFM::update_responsibility) AudioStream::update_all();
-
+    
   } else {
-
+   //digitalWrite(13, LOW);
     //fill the first half
     unsigned long t2 = micros();
     process(AudioOutputFM::block_left, AudioOutputFM::block_right, 0);
@@ -367,7 +370,7 @@ inline
 static void processStereo(const float blockL[I_NUM_SAMPLES], const float blockR[I_NUM_SAMPLES], const unsigned offset)
 {
   static float pilot_acc = 0;
-  const float  pilot_inc = 19000.0 * TWO_PI / I_SAMPLERATE  ; // increment per sample for 19kHz pilot tone & AUDIO_SAMPLE_RATE_EXACT*INTERPOLATION
+  const float  pilot_inc = FM_PILOT * TWO_PI / I_SAMPLERATE  ; // increment per sample for 19kHz pilot tone & AUDIO_SAMPLE_RATE_EXACT*INTERPOLATION
 
   float sample, tmp;
   float sample_L;

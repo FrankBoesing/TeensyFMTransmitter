@@ -24,7 +24,7 @@
 
 #include "output_fm.h"
 
-#if INTERPOLATION >= 8
+#if defined(__IMXRT1062__) && INTERPOLATION >= 8
 
 //RDS generation according to CuteSDR, Moe Wheatley
 //https://versaweb.dl.sourceforge.net/project/cutesdr/doc/CuteSDR102.pdf
@@ -343,7 +343,7 @@ float rds_sample()
   int n1;
   int n2;
 
-  n1 = (int)( rds.Time * I_SAMPLERATE);  //create integer index
+  n1 = (int)( rds.Time * (float)I_SAMPLERATE);  //create integer index
 
   //calculate index positions of both pointers
   if (rds.Time > rdsperiod)

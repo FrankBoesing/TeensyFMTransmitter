@@ -66,7 +66,7 @@ double m_sinc(int m, double fc)
 }
 
 FLASHMEM
-void calc_FIR_coeffs (float * coeffs_I, int numCoeffs, float fc, float Astop, int type, float dfc, float Fsamprate)
+void calc_FIR_coeffs (float * coeffs_I, int numCoeffs, double fc, double Astop, int type, double dfc, double Fsamprate)
 // pointer to coefficients variable, no. of coefficients to calculate, frequency where it happens, stopband attenuation in dB,
 // filter type, half-filter bandwidth (only for bandpass and notch)
 { // modified by WMXZ and DD4WH after
@@ -85,7 +85,7 @@ void calc_FIR_coeffs (float * coeffs_I, int numCoeffs, float fc, float Astop, in
   if (Astop < 20.96)
     Beta = 0.0;
   else if (Astop >= 50.0)
-    Beta = 0.1102 * (Astop - 8.71);
+    Beta = 0.1102 * (double)(Astop - 8.71);
   else
     Beta = 0.5842 * pow((Astop - 20.96), 0.4) + 0.07886 * (Astop - 20.96);
 
