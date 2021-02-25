@@ -49,7 +49,7 @@ static struct {
 #define FM_PILOT            19000.0
 #define PLL_FREF            24000000.0
 #define PLL_FREF_MULT       27.0
-#define PLL_DENOMINATOR     (1<<20)
+#define PLL_DENOMINATOR     960000
 #define PLL_POST_DIV_SELECT 0    // 0: 1/4; 1: 1/2; 2: 1/1
 
 static const float FM_deviation = 4.0 * FM_DEVIATION;
