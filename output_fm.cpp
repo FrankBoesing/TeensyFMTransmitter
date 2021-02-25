@@ -38,28 +38,24 @@ bool AudioOutputFM::update_responsibility = false;
 DMAChannel AudioOutputFM::dma(false);
 
 static struct {
-  float FS; //PLL Frequency
+  uint32_t FS; //PLL Frequency
   int i2s_clk_pred;
   int i2s_clk_podf;
-  float i2s_clk_divprod;
+  float ma, mb;
 } carrier;
 
 #define AUDIO_BANDWIDTH     15000.0
 #define FM_DEVIATION        75000.0
 #define FM_PILOT            19000.0
 #define PLL_FREF            24000000.0
-#define PLL_FREF_MULT       27.0
-#define PLL_DENOMINATOR     960000
-#define PLL_POST_DIV_SELECT 0    // 0: 1/4; 1: 1/2; 2: 1/1
-
-static const float FM_deviation = 4.0 * FM_DEVIATION;
+#define PLL_DENOMINATOR     960000 // MCUexpresso says 960000 max (thx DM5SG)
 
 // Attention: interpolation_taps for the interpolation filter must be a multiple of the interpolation factor L (constant INTERPOLATION)
 static const unsigned interpolation_taps = 16 * INTERPOLATION;
 static const float n_att = 90.0; // desired stopband attenuation
-static float interpolation_coeffs[interpolation_taps];
-static float interpolation_L_state[(NUM_SAMPLES-1) + interpolation_taps / INTERPOLATION];
-static float interpolation_R_state[(NUM_SAMPLES-1) + interpolation_taps / INTERPOLATION];
+DMAMEM static __attribute__((aligned(32))) float interpolation_coeffs[interpolation_taps];
+DMAMEM static __attribute__((aligned(32))) float interpolation_L_state[(NUM_SAMPLES-1) + interpolation_taps / INTERPOLATION];
+DMAMEM static __attribute__((aligned(32))) float interpolation_R_state[(NUM_SAMPLES-1) + interpolation_taps / INTERPOLATION];
 static arm_fir_interpolate_instance_f32 interpolationL;
 static arm_fir_interpolate_instance_f32 interpolationR;
 
@@ -87,6 +83,91 @@ inline static void processStereo(const float blockL[I_NUM_SAMPLES], const float 
         (1 << 6);  // 2 Speed
 */
 
+struct sdivisors {
+  uint8_t div_select;
+  uint8_t post_div_select;
+  uint8_t video_div;
+  uint8_t sai_clk_pred;
+  uint8_t sai_clk_podf;
+};
+
+PROGMEM static const uint8_t translate_pll_post_div[] =  { 0, 2, 1, 0, 0 };
+PROGMEM static const uint8_t translate_pll_video_div[] = { 0, 2, 1, 0, 3 };
+
+/*
+POST_DIV_SELECT:
+00 — Divide by 4.
+01 — Divide by 2.
+10 — Divide by 1.
+11 — Reserved
+
+video div:
+00 divide by 1 (Default)
+01 divide by 2
+10 divide by 1
+11 divide by 4
+*/
+
+FLASHMEM
+sdivisors searchDivSettings(double f)
+{
+  sdivisors divisors;
+  uint32_t best_nom = 0;
+
+  for (unsigned n1 = 1; n1 <= 4; n1 *= 2) {
+
+    for (unsigned n2 = 1; n2 <= 4; n2 *= 2) {
+      if (n2 > n1) continue;
+      if (2 == n2 && 2 == n1) continue;
+
+      for (unsigned saidiv = 1; saidiv <= 8; saidiv++) {
+
+        double fPLL = (n1 * n2 * saidiv) * f;
+        if (fPLL <  648000000) continue;
+        if (fPLL > 1300000000) break;
+        if (fPLL / n1 / n2 / saidiv > 300000000) continue;
+
+        unsigned divselect = floor(fPLL / PLL_FREF);
+        if (divselect < 27) continue;
+        if (divselect > 54) break;
+
+        uint32_t nom = (fPLL - ((double)divselect * PLL_FREF)) * PLL_DENOMINATOR / PLL_FREF;
+
+        if (nom < 1) continue;
+        if (nom >= PLL_DENOMINATOR) continue;
+
+        if ( (abs(PLL_DENOMINATOR / 2.0 - nom) < abs(PLL_DENOMINATOR / 2.0 - best_nom)) ) {
+          best_nom = nom;
+          divisors.div_select = divselect;
+          divisors.post_div_select = n1;
+          divisors.video_div = n2;
+          divisors.sai_clk_pred = saidiv;
+          divisors.sai_clk_podf = 1;
+#if 0
+          Serial.print("**");
+#endif
+        }
+#if 0
+        Serial.printf("PLL post div:%d ", n1);
+        Serial.printf("PLL post div2:%d ", n2);
+        Serial.printf("SAIdiv:%d ", saidiv);
+        Serial.printf("fpll:%d ",(unsigned) fPLL);
+        Serial.printf("divselect:%d ", divselect);
+        Serial.printf("Nominator:%d ", nom);
+
+        nom = ((n1 * n2 * saidiv) * (f - 75000) - (divselect * fref)) / mx;
+        Serial.printf("-75khZ: %d", nom);
+
+        nom = ((n1 * n2 * saidiv) * (f + 75000) - (divselect * fref)) / mx;
+        Serial.printf("+75khZ: %d", nom);
+        Serial.printf("\n");
+#endif
+      }
+    }
+  }
+  return divisors;
+}
+
 FLASHMEM
 void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
 {
@@ -94,9 +175,6 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
 
   dma.begin(true); // Allocate the DMA channel first
   pin = mclk_pin;
-
-  carrier.FS = MHz * 1000000 * 4;
-
 
   // pre-emphasis has been based on the more sophisticated Pre-emphasis filter designed by Jonti
   // https://jontio.zapto.org/download/preempiir.pdf
@@ -137,30 +215,34 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
 #endif
 #endif
 
-  carrier.i2s_clk_pred = 1; //SAI prescaler
-  carrier.i2s_clk_podf = 1 + (PLL_FREF * PLL_FREF_MULT) / (carrier.FS * carrier.i2s_clk_pred);
-  carrier.i2s_clk_divprod = carrier.i2s_clk_pred * carrier.i2s_clk_podf / PLL_FREF;
-  double C = carrier.FS * carrier.i2s_clk_divprod;
-  int nfact = C;
-  int mult = C * PLL_DENOMINATOR - (nfact * PLL_DENOMINATOR);
+  //while(!Serial);
+  carrier.FS = MHz * 1000000.0;
+  sdivisors divisors = searchDivSettings(carrier.FS);
+  carrier.i2s_clk_pred = divisors.sai_clk_pred;
+  carrier.i2s_clk_podf = divisors.sai_clk_podf;
+  uint32_t mult = (uint32_t)divisors.post_div_select * divisors.video_div * divisors.sai_clk_pred *  divisors.sai_clk_podf;
+  carrier.ma = FM_DEVIATION * (PLL_DENOMINATOR / PLL_FREF) * mult;
+  carrier.mb = (PLL_DENOMINATOR / PLL_FREF) * (MHz * 1000000.0 * mult - PLL_FREF * divisors.div_select);
 
   CCM_ANALOG_PLL_VIDEO = CCM_ANALOG_PLL_VIDEO_BYPASS | CCM_ANALOG_PLL_VIDEO_ENABLE
-                         | CCM_ANALOG_PLL_VIDEO_POST_DIV_SELECT(PLL_POST_DIV_SELECT) // 0: 1/4; 1: 1/2; 2: 1/1
-                         | CCM_ANALOG_PLL_VIDEO_DIV_SELECT(nfact);
+                         | CCM_ANALOG_PLL_VIDEO_POST_DIV_SELECT(translate_pll_post_div[divisors.post_div_select]) // 0: 1/4; 1: 1/2; 2: 1/1
+                         | CCM_ANALOG_PLL_VIDEO_DIV_SELECT(divisors.div_select);
 
-  CCM_ANALOG_PLL_VIDEO_NUM   = mult;
+  CCM_ANALOG_MISC2 = (CCM_ANALOG_MISC2 & ~(CCM_ANALOG_MISC2_VIDEO_DIV(3)))
+                         | CCM_ANALOG_MISC2_VIDEO_DIV(translate_pll_video_div[divisors.video_div]);
+
+  CCM_ANALOG_PLL_VIDEO_NUM   = carrier.mb;
   CCM_ANALOG_PLL_VIDEO_DENOM = PLL_DENOMINATOR;
 
-  CCM_ANALOG_PLL_VIDEO &= ~CCM_ANALOG_PLL_VIDEO_POWERDOWN;//Switch on PLL
+  CCM_ANALOG_PLL_VIDEO_CLR = CCM_ANALOG_PLL_VIDEO_POWERDOWN;//Switch on PLL
   while (!(CCM_ANALOG_PLL_VIDEO & CCM_ANALOG_PLL_VIDEO_LOCK)) {}; //Wait for pll-lock
-
-  CCM_ANALOG_PLL_VIDEO &= ~CCM_ANALOG_PLL_VIDEO_BYPASS;//Disable Bypass
+  CCM_ANALOG_PLL_VIDEO_CLR = CCM_ANALOG_PLL_VIDEO_BYPASS;//Disable Bypass
 
   //QTimer
   const int comp1 = I_TIMERVAL - 1;
   TMR4_ENBL &= ~(1 << 3); //Disable
   TMR4_SCTRL3 = TMR_SCTRL_OEN | TMR_SCTRL_FORCE;
-  TMR4_CSCTRL3 = TMR_CSCTRL_CL1(1) /*| TMR_CSCTRL_TCF1EN*/;
+  TMR4_CSCTRL3 = 0;
   TMR4_CNTR3 = 0;
   TMR4_LOAD3 = 0;
   TMR4_COMP13 = comp1;
@@ -171,7 +253,6 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
     register into the COMP1 register.
   */
   TMR4_DMA3 = TMR_DMA_CMPLD1DE;
-  TMR4_CNTR3 = 0;
   TMR4_ENBL |= (1 << 3); //Enable
 
   //route the timer output through XBAR to edge trigger DMA request
@@ -196,7 +277,7 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
   dma.attachInterrupt(dmaISR);
 
   dma.enable();
-  
+
   enable( true ); //Enable I2s
   update_responsibility = update_setup();
 
@@ -298,7 +379,7 @@ void AudioOutputFM::dmaISR()
     process(AudioOutputFM::block_left, AudioOutputFM::block_right,  NUM_SAMPLES);
     t1 = micros() - t1;
     if (AudioOutputFM::update_responsibility) AudioStream::update_all();
-    
+
   } else {
    //digitalWrite(13, LOW);
     //fill the first half
@@ -307,7 +388,7 @@ void AudioOutputFM::dmaISR()
 #if INTERPOLATION >= 8
     //update RDS Data
     rds_update();
-#endif    
+#endif
     t2 = micros() - t2;
     unsigned long us = t1 + t2;
     if (us > AudioOutputFM::us) AudioOutputFM::us = us;
@@ -316,13 +397,16 @@ void AudioOutputFM::dmaISR()
 }
 
 //Translates a sample to PLL multiplicator:
-static inline __attribute__ ((pure))
+static inline
 uint32_t calcPLLnmult(float fsample)
 {
-  float C = (carrier.FS + FM_deviation * fsample) * carrier.i2s_clk_divprod;
-  uint32_t mult = C * PLL_DENOMINATOR - ((int)C * PLL_DENOMINATOR);
-  return mult;
+  return carrier.ma * fsample + carrier.mb;
 }
+
+//  carrier.mult = (uint32_t)divisors.post_div_select * divisors.video_div * divisors.sai_clk_pred *  divisors.sai_clk_podf;
+//  carrier.div_fref = PLL_FREF * divisors.deviselect;
+
+
 
 //Called for every (half-)block of samples:
 static inline
@@ -335,9 +419,15 @@ void process(const audio_block_t *blockL, const audio_block_t *blockR, unsigned 
 
   //convert 16 bit samples to float & normalize
   if (blockR != nullptr) {
-    for (unsigned idx = 0; idx < NUM_SAMPLES; idx++) {
-      bL[idx] = blockL->data[idx + offset] / 32768.0f;
-      bR[idx] = blockR->data[idx + offset] / 32768.0f;
+    for (unsigned idx = 0; idx < NUM_SAMPLES; idx+=4) {
+      bL[idx + 0] = blockL->data[idx + 0 + offset] / 32768.0f;
+      bR[idx + 0] = blockR->data[idx + 0 + offset] / 32768.0f;
+      bL[idx + 1] = blockL->data[idx + 1 + offset] / 32768.0f;
+      bR[idx + 1] = blockR->data[idx + 1 + offset] / 32768.0f;
+      bL[idx + 2] = blockL->data[idx + 2 + offset] / 32768.0f;
+      bR[idx + 2] = blockR->data[idx + 2 + offset] / 32768.0f;
+      bL[idx + 3] = blockL->data[idx + 3 + offset] / 32768.0f;
+      bR[idx + 3] = blockR->data[idx + 3 + offset] / 32768.0f;
     }
   } else {
     //blockR not filled: copy left channel.
@@ -369,8 +459,8 @@ void process(const audio_block_t *blockL, const audio_block_t *blockR, unsigned 
 inline
 static void processStereo(const float blockL[I_NUM_SAMPLES], const float blockR[I_NUM_SAMPLES], const unsigned offset)
 {
-  static float pilot_acc = 0;
-  const float  pilot_inc = FM_PILOT * TWO_PI / I_SAMPLERATE  ; // increment per sample for 19kHz pilot tone & AUDIO_SAMPLE_RATE_EXACT*INTERPOLATION
+  static double pilot_acc = 0;
+  const double  pilot_inc = FM_PILOT * TWO_PI / I_SAMPLERATE  ; // increment per sample for 19kHz pilot tone & AUDIO_SAMPLE_RATE_EXACT*INTERPOLATION
 
   float sample, tmp;
   float sample_L;
@@ -394,33 +484,30 @@ static void processStereo(const float blockL[I_NUM_SAMPLES], const float blockR[
     lastInputSampleR = tmp;
 
     // 2.) Create MPX signal
-    pilot_acc = pilot_acc + pilot_inc;    
     LminusR  =  (sample_L - sample_R) * (INTERPOLATION / 2);      // generate LEFT minus RIGHT signal
     LplusR   =  (sample_L + sample_R) * (INTERPOLATION / 2);      // generate LEFT plus RIGHT signal
-    sample = LplusR + (LminusR * arm_sin_f32(2.0f * pilot_acc));  // generate MPX signal with LEFT minus right DSB signal around 2*19kHz = 38kHz
+    pilot_acc = pilot_acc + pilot_inc;
+    sample = LplusR + (LminusR * arm_sin_f32(2.0f * (float)pilot_acc));  // generate MPX signal with LEFT minus right DSB signal around 2*19kHz = 38kHz
     sample = sample * 0.85f;                                      // 85% signal
     sample = sample + 0.1f * arm_sin_f32(pilot_acc);              // 10% pilot tone at 19kHz
 
 #if INTERPOLATION >= 8 //Interpolation is good enough to add RDS
     // 3.) Add RDS sample:
-    sample = sample + 0.5f * rds_sample() * arm_sin_f32(3.0f * pilot_acc); // 5% RDS (rds_sample() maxvalue 0.1)
+    sample = sample + 0.5f * rds_sample() * arm_sin_f32(3.0f * (float)pilot_acc); // 5% RDS (rds_sample() maxvalue 0.1)
 #endif
 
     // 4.) wrap around pilot tone phase accumulator
-    if (pilot_acc > (float)TWO_PI) pilot_acc -= (float)TWO_PI;
-
-    // 5. ) convert to PLL value and save.
-    fm_tx_buffer[idx + offset] = calcPLLnmult(sample);
+    if (pilot_acc >= TWO_PI) pilot_acc -= TWO_PI;
 
 #else // No Interpolation : do it mono
     // 1.) Pre-emphasis filter
     tmp = (blockL[idx] + blockR[idx]) * 0.5f;
     sample = pre_a0 * tmp + pre_a1 * lastInputSampleL + pre_b1 * tmp;
     lastInputSampleL = tmp;
-
-    // 2.) Create mono signal
-    fm_tx_buffer[idx + offset] = calcPLLnmult( sample );
 #endif
+
+    // convert to PLL value and save.
+    fm_tx_buffer[idx + offset] = calcPLLnmult(sample);
 
   }
 
