@@ -37,13 +37,9 @@ AudioOutputFM            fm(33, 107, PREEMPHASIS_50); //Pin (23= I2S1, 30= I2S3,
 AudioConnection          patchCord1(playWav1, 0, fm, 0);
 AudioConnection          patchCord2(playWav1, 1, fm, 1);
 
-//Tested Frequencies:
-//no good: 90, 93, 96, 99, 102, 105 and all +-500kHz
-//good : 88, 89, 91, 92, 93, 94, 95, 97, 98, 100, 101, 103, 104, 106, 107
 
 #define MAXRUNTIME      (10 * 60 * 1000) // 10 Minutes
 unsigned long starttime = millis();
-
 
 void setup()
 {
@@ -77,10 +73,8 @@ void textStateMachine(const char *filename)
 
   switch (state++)
   {
-    case 0 : fm.printf("\n%s\rDiag:\rAudio %2.2f%%\rFM: %2.2f%%", filename, AudioProcessorUsage(), (fm.time_us() / 2902.0f) * 100.0f ); break;
-    case 1 : fm.println("\nPeter Piper "); break;
-    case 2 : fm.printf("picked"); break;
-    case 3 : fm.printf("\nmixed pickles."); break;
+    case 0 : fm.printf("%s Diag: Audio %2.2f%% FM: %2.2f%% ", filename, (double)(AudioProcessorUsage()), (double)((fm.time_us() / 2902.0f) * 100.0f) ); break;
+    // case 1 : fm.println("Peter Piper picked mixed pickles"); break;
     default : state = 0; break;
   }
 }
@@ -97,7 +91,7 @@ void playFile(const char *filename)
     delay(1500);
 
     if ( fm.enabled() ) {
-      Serial.printf("Diagnostics AudioLib:%0.2f%% FM:%dus\n", AudioProcessorUsage(), fm.time_us() );
+      Serial.printf("Diagnostics AudioLib:%0.2f%% FM:%dus\n", (double)AudioProcessorUsage(), fm.time_us() );
       textStateMachine(filename);
       unsigned runtime = millis() - starttime;
       if (runtime > MAXRUNTIME) fm.enable(false); //disable transmitter

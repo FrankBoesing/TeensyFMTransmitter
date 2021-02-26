@@ -119,8 +119,8 @@ void calc_FIR_coeffs (float * coeffs_I, int numCoeffs, double fc, double Astop, 
     {
       if (2 * ii == nc) continue;
       double x = (double)(2 * ii - nc) / (double)nc;
-      double w = Izero(Beta * sqrt(1.0f - x * x)) / izb; // Kaiser window
-      coeffs_I[2 * ii + 1] = 1.0f / (PIH * (double)(ii - nc / 2)) * w ;
+      double w = Izero(Beta * sqrt(1.0 - x * x)) / izb; // Kaiser window
+      coeffs_I[2 * ii + 1] = 1.0 / (PIH * (double)(ii - nc / 2)) * w ;
     }
     return;
   }
@@ -128,7 +128,7 @@ void calc_FIR_coeffs (float * coeffs_I, int numCoeffs, double fc, double Astop, 
   for (int ii = - nc, jj = 0; ii < nc; ii += 2, jj++)
   {
     double x = (double)ii / (double)nc;
-    double w = Izero(Beta * sqrt(1.0f - x * x)) / izb; // Kaiser window
+    double w = Izero(Beta * sqrt(1.0 - x * x)) / izb; // Kaiser window
     coeffs_I[jj] = fcf * m_sinc(ii, fcf) * w;
 
   }
@@ -139,11 +139,11 @@ void calc_FIR_coeffs (float * coeffs_I, int numCoeffs, double fc, double Astop, 
   }
   else if (type == 2)
   {
-    for (int jj = 0; jj < nc + 1; jj++) coeffs_I[jj] *= 2.0f * cos(PIH * (2 * jj - nc) * fc);
+    for (int jj = 0; jj < nc + 1; jj++) coeffs_I[jj] *= (float)(2.0 * cos(PIH * (2 * jj - nc) * fc));
   }
   else if (type == 3)
   {
-    for (int jj = 0; jj < nc + 1; jj++) coeffs_I[jj] *= -2.0f * cos(PIH * (2 * jj - nc) * fc);
+    for (int jj = 0; jj < nc + 1; jj++) coeffs_I[jj] *= (float)(-2.0 * cos(PIH * (2 * jj - nc) * fc));
     coeffs_I[nc / 2] += 1;
   }
 

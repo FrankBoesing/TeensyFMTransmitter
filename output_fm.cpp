@@ -91,8 +91,6 @@ struct sdivisors {
   uint8_t sai_clk_podf;
 };
 
-PROGMEM static const uint8_t translate_pll_post_div[] =  { 0, 2, 1, 0, 0 };
-PROGMEM static const uint8_t translate_pll_video_div[] = { 0, 2, 1, 0, 3 };
 
 /*
 POST_DIV_SELECT:
@@ -114,54 +112,57 @@ sdivisors searchDivSettings(double f)
   sdivisors divisors;
   uint32_t best_nom = 0;
 
-  for (unsigned n1 = 1; n1 <= 4; n1 *= 2) {
+  for (unsigned n1 = 4; n1 >= 1 ; n1 /= 2) {
 
-    for (unsigned n2 = 1; n2 <= 4; n2 *= 2) {
+    for (unsigned n2 = 4; n2 >= 1; n2 /= 2) {
       if (n2 > n1) continue;
       if (2 == n2 && 2 == n1) continue;
-
-      for (unsigned saidiv = 1; saidiv <= 8; saidiv++) {
-
-        double fPLL = (n1 * n2 * saidiv) * f;
-        if (fPLL <  648000000) continue;
-        if (fPLL > 1300000000) break;
-        if (fPLL / n1 / n2 / saidiv > 300000000) continue;
-
-        unsigned divselect = floor(fPLL / PLL_FREF);
-        if (divselect < 27) continue;
-        if (divselect > 54) break;
-
-        uint32_t nom = (fPLL - ((double)divselect * PLL_FREF)) * PLL_DENOMINATOR / PLL_FREF;
-
-        if (nom < 1) continue;
-        if (nom >= PLL_DENOMINATOR) continue;
-
-        if ( (abs(PLL_DENOMINATOR / 2.0 - nom) < abs(PLL_DENOMINATOR / 2.0 - best_nom)) ) {
-          best_nom = nom;
-          divisors.div_select = divselect;
-          divisors.post_div_select = n1;
-          divisors.video_div = n2;
-          divisors.sai_clk_pred = saidiv;
-          divisors.sai_clk_podf = 1;
+      
+      for (unsigned saidiv = 8; saidiv >= 1; saidiv--) {
+        for (unsigned saidiv2 = 1; saidiv2 <= 64; saidiv2++) {         
+          
+          double fPLL = (n1 * n2 * saidiv * saidiv2) * f;
+          if (fPLL <  648000000) continue;
+          if (fPLL > 1300000000) break;
+          if (fPLL / n1 / n2 / saidiv > 300000000) continue;
+  
+          unsigned divselect = floor(fPLL / PLL_FREF);
+          if (divselect < 27) continue;
+          if (divselect > 54) break;
+  
+          uint32_t nom = (fPLL - ((double)divselect * PLL_FREF)) * PLL_DENOMINATOR / PLL_FREF;
+  
+          if (nom < 1) continue;
+          if (nom >= PLL_DENOMINATOR) continue;
+  
+          if ( (abs(PLL_DENOMINATOR / 2.0 - nom) < abs(PLL_DENOMINATOR / 2.0 - best_nom)) ) {
+            best_nom = nom;
+            divisors.div_select = divselect;
+            divisors.post_div_select = n1;
+            divisors.video_div = n2;
+            divisors.sai_clk_pred = saidiv;
+            divisors.sai_clk_podf = saidiv2;
 #if 0
-          Serial.print("**");
+            Serial.print("**");
+#endif
+          }
+#if 0
+          Serial.printf("PLL post div:%d ", n1);
+          Serial.printf("PLL post div2:%d ", n2);
+          Serial.printf("SAI pred:%d ", saidiv);
+          Serial.printf("SAI podf:%d ", saidiv2);
+          Serial.printf("fpll:%d ",(unsigned) fPLL);
+          Serial.printf("divselect:%d ", divselect);
+          Serial.printf("Nominator:%d ", nom);
+  
+          nom = ((n1 * n2 * saidiv * saidiv2) * (f - 75000) - (divselect * fref)) / mx;
+          Serial.printf("-75khZ: %d", nom);
+  
+          nom = ((n1 * n2 * saidiv * saidiv2) * (f + 75000) - (divselect * fref)) / mx;
+          Serial.printf("+75khZ: %d", nom);
+          Serial.printf("\n");
 #endif
         }
-#if 0
-        Serial.printf("PLL post div:%d ", n1);
-        Serial.printf("PLL post div2:%d ", n2);
-        Serial.printf("SAIdiv:%d ", saidiv);
-        Serial.printf("fpll:%d ",(unsigned) fPLL);
-        Serial.printf("divselect:%d ", divselect);
-        Serial.printf("Nominator:%d ", nom);
-
-        nom = ((n1 * n2 * saidiv) * (f - 75000) - (divselect * fref)) / mx;
-        Serial.printf("-75khZ: %d", nom);
-
-        nom = ((n1 * n2 * saidiv) * (f + 75000) - (divselect * fref)) / mx;
-        Serial.printf("+75khZ: %d", nom);
-        Serial.printf("\n");
-#endif
       }
     }
   }
@@ -169,8 +170,11 @@ sdivisors searchDivSettings(double f)
 }
 
 FLASHMEM
-void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
+void AudioOutputFM::begin(uint8_t mclk_pin, float MHz, int preemphasis)
 {
+  const uint8_t translate_pll_post_div[] =  { 2, 1, 0, 0 };
+  const uint8_t translate_pll_video_div[] = { 0, 1, 0, 3 };
+  
   memset(fm_tx_buffer, 0, sizeof(fm_tx_buffer));
 
   dma.begin(true); // Allocate the DMA channel first
@@ -216,20 +220,20 @@ void AudioOutputFM::begin(uint8_t mclk_pin, unsigned MHz, int preemphasis)
 #endif
 
   //while(!Serial);
-  carrier.FS = MHz * 1000000.0;
+  carrier.FS = (double)MHz * 1000000.0;
   sdivisors divisors = searchDivSettings(carrier.FS);
   carrier.i2s_clk_pred = divisors.sai_clk_pred;
   carrier.i2s_clk_podf = divisors.sai_clk_podf;
   uint32_t mult = (uint32_t)divisors.post_div_select * divisors.video_div * divisors.sai_clk_pred *  divisors.sai_clk_podf;
   carrier.ma = FM_DEVIATION * (PLL_DENOMINATOR / PLL_FREF) * mult;
-  carrier.mb = (PLL_DENOMINATOR / PLL_FREF) * (MHz * 1000000.0 * mult - PLL_FREF * divisors.div_select);
+  carrier.mb = (PLL_DENOMINATOR / PLL_FREF) * ((double)MHz * 1000000.0 * mult - PLL_FREF * divisors.div_select);
 
   CCM_ANALOG_PLL_VIDEO = CCM_ANALOG_PLL_VIDEO_BYPASS | CCM_ANALOG_PLL_VIDEO_ENABLE
-                         | CCM_ANALOG_PLL_VIDEO_POST_DIV_SELECT(translate_pll_post_div[divisors.post_div_select]) // 0: 1/4; 1: 1/2; 2: 1/1
+                         | CCM_ANALOG_PLL_VIDEO_POST_DIV_SELECT(translate_pll_post_div[divisors.post_div_select - 1]) // 0: 1/4; 1: 1/2; 2: 1/1
                          | CCM_ANALOG_PLL_VIDEO_DIV_SELECT(divisors.div_select);
 
   CCM_ANALOG_MISC2 = (CCM_ANALOG_MISC2 & ~(CCM_ANALOG_MISC2_VIDEO_DIV(3)))
-                         | CCM_ANALOG_MISC2_VIDEO_DIV(translate_pll_video_div[divisors.video_div]);
+                         | CCM_ANALOG_MISC2_VIDEO_DIV(translate_pll_video_div[divisors.video_div - 1]);
 
   CCM_ANALOG_PLL_VIDEO_NUM   = carrier.mb;
   CCM_ANALOG_PLL_VIDEO_DENOM = PLL_DENOMINATOR;
@@ -403,11 +407,6 @@ uint32_t calcPLLnmult(float fsample)
   return carrier.ma * fsample + carrier.mb;
 }
 
-//  carrier.mult = (uint32_t)divisors.post_div_select * divisors.video_div * divisors.sai_clk_pred *  divisors.sai_clk_podf;
-//  carrier.div_fref = PLL_FREF * divisors.deviselect;
-
-
-
 //Called for every (half-)block of samples:
 static inline
 void process(const audio_block_t *blockL, const audio_block_t *blockR, unsigned offset)
@@ -499,11 +498,13 @@ static void processStereo(const float blockL[I_NUM_SAMPLES], const float blockR[
     // 4.) wrap around pilot tone phase accumulator
     if (pilot_acc >= TWO_PI) pilot_acc -= TWO_PI;
 
-#else // No Interpolation : do it mono
+#elif INTERPOLATION == 1// No Interpolation : do it mono
     // 1.) Pre-emphasis filter
     tmp = (blockL[idx] + blockR[idx]) * 0.5f;
     sample = pre_a0 * tmp + pre_a1 * lastInputSampleL + pre_b1 * tmp;
     lastInputSampleL = tmp;
+#else
+#error ITERPOLATION-value not supported.
 #endif
 
     // convert to PLL value and save.

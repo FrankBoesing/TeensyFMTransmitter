@@ -39,7 +39,7 @@
 
 #define INTERPOLATION         8
 
-#define AUDIO_SAMPLERATE      44117.64706
+#define AUDIO_SAMPLERATE      44117.6470588235
 #define I_SAMPLERATE          (AUDIO_SAMPLERATE * INTERPOLATION)
 
 
@@ -52,7 +52,7 @@ class AudioOutputFM : public AudioStream
 
 {
   public:
-    AudioOutputFM(uint8_t pin, unsigned MHz, int preemphasis) : AudioStream(2, inputQueueArray) { begin(pin, MHz, preemphasis); }
+    AudioOutputFM(uint8_t pin, float MHz, int preemphasis) : AudioStream(2, inputQueueArray) { begin(pin, MHz, preemphasis); }
     
     void enable(bool enabled); //Enable / disable transmitter
     bool enabled() { return this->isenabled; };
@@ -72,7 +72,7 @@ class AudioOutputFM : public AudioStream
 #endif
 
   private:
-    void begin(uint8_t pin, unsigned MHz, int preemphasis);
+    void begin(uint8_t pin, float MHz, int preemphasis);
     virtual void update(void);
     static audio_block_t *block_left;
     static audio_block_t *block_right;
