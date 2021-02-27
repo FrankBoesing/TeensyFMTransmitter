@@ -51,18 +51,21 @@ void setup()
       delay(500);
     }
   }
-
+  
+#if FM_STEREO_RDS
   //optional:
   fm.setPI(42); //Program Identification-Nr
   fm.setPTY(1); //News
   fm.setTA(0);  //No Traffic Announcements
   fm.setTP(0);  //No Traffic Program
   fm.setPS("Teensy"); //max 8 chars
+#endif
 }
 
 //optional:
 void textStateMachine(const char *filename)
 {
+#if FM_STEREO_RDS
   static int state = 0;
   if (!fm.transmitted()) return;
 
@@ -77,6 +80,7 @@ void textStateMachine(const char *filename)
     // case 1 : fm.println("Peter Piper picked mixed pickles"); break;
     default : state = 0; break;
   }
+#endif
 }
 
 void playFile(const char *filename)

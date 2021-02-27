@@ -37,16 +37,17 @@
 #define PREEMPHASIS_50        0   // use this if you are in Europe or elsewhere in the world
 #define PREEMPHASIS_75        1   // use this if you are in the Americas or South Korea
 
-#define INTERPOLATION         8
+#define INTERPOLATION         8   // Mono: 1 Stereo: min >=2, RDS: >=5 (the more the better)
+#define FM_STEREO             (INTERPOLATION >= 2)
+#define FM_STEREO_RDS         (INTERPOLATION >= 5)
+#define FM_MONO               !(FM_STEREO)
 
 #define AUDIO_SAMPLERATE      44117.6470588235
 #define I_SAMPLERATE          (AUDIO_SAMPLERATE * INTERPOLATION)
 
-
-
 class AudioOutputFM : public AudioStream
 
-#if INTERPOLATION >= 8
+#if FM_STEREO_RDS
                     , public Print
 #endif
 
@@ -59,7 +60,7 @@ class AudioOutputFM : public AudioStream
     
     unsigned long time_us(void) { return us; };
 
-#if INTERPOLATION >= 8
+#if FM_STEREO_RDS
     //RDS-Data:
     void setPI(uint16_t _PI);
     void setPTY(uint8_t _PTY);

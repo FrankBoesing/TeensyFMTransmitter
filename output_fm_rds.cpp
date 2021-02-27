@@ -24,7 +24,7 @@
 
 #include "output_fm.h"
 
-#if defined(__IMXRT1062__) && INTERPOLATION >= 8
+#if defined(__IMXRT1062__) && FM_STEREO_RDS
 
 //RDS generation according to CuteSDR, Moe Wheatley
 //https://versaweb.dl.sourceforge.net/project/cutesdr/doc/CuteSDR102.pdf
