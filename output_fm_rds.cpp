@@ -190,7 +190,7 @@ void rds_begin() {
 
   rds.data_PI = 0xfffe;
   rds.data_PTY = 1;
-  strncpy(rds.data_PS, "TeensyFM", sizeof(rds.data_PS) - 1 );
+  strncpy(rds.data_PS, "TFM    ", sizeof(rds.data_PS) - 1 );
   strncpy(rds.data_RT, "TeensyFMTransmitter compiled:" __DATE__ " " __TIME__ , sizeof(rds.data_RT) );
   rds.flag_RTChanged = true;
   rds.data_updated = true;
